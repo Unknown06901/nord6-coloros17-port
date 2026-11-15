@@ -22,6 +22,8 @@ change the build makes; read it before changing a step.
 - Kit folder: `~/port/port_kit` on WSL2 (Ubuntu) under Windows. Inputs and outputs sit next to it: `~/port/base/images`
   (Nord 6 OxygenOS 16), `~/port/donor_c80/images` (OnePlus 15 ColorOS 17 C.80), `~/port/out_*` (build outputs), and a
   build log `~/port/_<name>_build.log` per build.
+- The kit is a git repo, pushed to the private GitHub repo `Unknown06901/nord6-coloros17-port` (`main`). Commit
+  kit changes with a clear message; push when the user asks. Build inputs and outputs are never committed.
 - adb is the Windows binary, called from WSL:
   `/mnt/c/Users/Shaml/Desktop/platform-tools-latest-windows/platform-tools/adb.exe`. It takes Windows paths for
   push/pull (for example `C:\Users\Shaml\Downloads\...`), so stage files under `/mnt/c/Users/Shaml/Downloads/`.

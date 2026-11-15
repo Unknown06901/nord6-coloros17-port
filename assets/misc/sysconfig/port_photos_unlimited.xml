@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- port_kit: Google Photos treats this phone as a 2016 Pixel/Nexus preload device and offers unlimited backup
+     at no charge (checked on the Nord 6 port, Photos 8.1, 2026-11-15: "This CPH2793 can back up unlimited
+     photos and videos at no charge"). No Build/prop spoof is needed. -->
+<config>
+    <feature name="com.google.android.apps.photos.NEXUS_PRELOAD" />
+    <feature name="com.google.android.apps.photos.PIXEL_PRELOAD" />
+    <feature name="com.google.android.apps.photos.PIXEL_2016_PRELOAD" />
+</config>

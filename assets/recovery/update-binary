@@ -1,0 +1,378 @@
+#!/system/bin/sh
+# OnePlus Nord 6 ColorOS 17 port - recovery installer.
+# TWRP runs it as: update-binary <api> <outfd> <zip>   (Install, USB-OTG or adb sideload)
+#
+# It does on the phone what flash_all.bat does from a PC. The logical partitions of the
+# current slot are recreated in super with lptools, the same metadata edits fastbootd makes:
+# other-slot, snapshot COW and scratch partitions are dropped, then each partition is created
+# at its new size. Each image is streamed from the zip through zstd and read back to check its
+# sha256. Boot images go straight to their slot partitions. Every check runs before the first
+# write. Sizes are compared in awk because mksh only does 32-bit arithmetic.
+#
+# Dry run (checks and prints the plan, writes nothing): adb shell touch /tmp/port_dryrun
+
+OUTFD=$2
+ZIP=$3
+TMP=/tmp/port_install
+LOG=/tmp/port_install.log
+DRY=0
+{ [ -n "$PORT_DRYRUN" ] || [ -f /tmp/port_dryrun ]; } && DRY=1
+
+rm -rf $TMP
+mkdir -p $TMP
+: > $LOG
+
+ui_print() {
+  echo "ui_print $1" >> /proc/self/fd/$OUTFD
+  echo "ui_print" >> /proc/self/fd/$OUTFD
+  echo "$1" >> $LOG
+}
+set_progress() { echo "set_progress $1" >> /proc/self/fd/$OUTFD; }
+log() { echo "$*" >> $LOG; }
+abort() {
+  ui_print " "
+  ui_print "ERROR: $1"
+  [ -n "$2" ] && ui_print "$2"
+  ui_print "Details: $LOG (Advanced > Copy Log saves it)"
+  cp -f $LOG /tmp/recovery_port_install.log 2>/dev/null
+  rm -rf $TMP
+  exit 1
+}
+# Commands that change the phone go through run: a dry run only logs them.
+run() {
+  log "+ $*"
+  [ $DRY = 1 ] && return 0
+  "$@" >> $LOG 2>&1
+}
+ge() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 >= b + 0) }'; }
+
+# Wait up to $1 seconds for Vol+ (returns 0) or Vol- (returns 1); without a key press returns $2.
+vol_key() {
+  local end ev
+  end=$(( $(date +%s) + $1 ))
+  while [ "$(date +%s)" -lt $end ]; do
+    ev=$(timeout 1 getevent -lqc 1 2>/dev/null)
+    case "$ev" in
+      *KEY_VOLUMEUP*DOWN*) return 0 ;;
+      *KEY_VOLUMEDOWN*DOWN*) return 1 ;;
+    esac
+  done
+  return $2
+}
+
+# Stream port/$1.img.zst from the zip into block device $2, then read back $3 bytes and
+# compare with sha256 $4.
+flash_img() {
+  local zrc got
+  log "write $1 -> $2"
+  [ $DRY = 1 ] && return 0
+  { unzip -p "$ZIP" "port/$1.img.zst" 2>> $LOG; echo $? > $TMP/unzip_rc; } |
+    zstd -dcq --no-sparse 2>> $LOG > "$2"
+  zrc=$?
+  [ "$(cat $TMP/unzip_rc)" = 0 ] && [ $zrc = 0 ] || { log "unzip rc $(cat $TMP/unzip_rc), zstd rc $zrc"; return 1; }
+  sync
+  echo 3 > /proc/sys/vm/drop_caches
+  got=$(head -c "$3" "$2" | sha256sum | cut -d' ' -f1)
+  log "sha256 $got (want $4)"
+  [ "$got" = "$4" ]
+}
+
+# Block device that lptools create/map reported ("... answered 1 at /dev/block/dm-12").
+mapped_dev() {
+  local dev i=0
+  dev=$(sed -n 's|.* at \(/dev/block/[^ ]*\).*|\1|p' $TMP/lpout | tail -1)
+  [ -n "$dev" ] || dev=/dev/block/mapper/$1
+  while [ ! -b "$dev" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i + 1)); done
+  [ -b "$dev" ] && echo "$dev"
+}
+
+# ------------------------------------------------------------------ package + device checks
+
+unzip -p "$ZIP" port/manifest.txt > $TMP/manifest 2>> $LOG || abort "This zip has no port/manifest.txt." "It is damaged or not a port package."
+TITLE=$(sed -n 's/^title=//p' $TMP/manifest)
+VERSION=$(sed -n 's/^version=//p' $TMP/manifest)
+NEWSDK=$(sed -n 's/^sdk=//p' $TMP/manifest)
+FWVER=$(sed -n 's/^fwversion=//p' $TMP/manifest)
+grep '^img ' $TMP/manifest > $TMP/images
+grep '^fw ' $TMP/manifest > $TMP/firmware
+
+ui_print "=========================================="
+ui_print " $TITLE"
+[ -n "$VERSION" ] && ui_print " $VERSION"
+ui_print "=========================================="
+[ $DRY = 1 ] && ui_print "DRY RUN: checks only, nothing is written."
+set_progress 0
+
+PRJ=$(getprop ro.boot.prjname)
+DEVICE=$(getprop ro.product.device)
+[ "$PRJ" = 24885 ] || [ "$DEVICE" = OP6135L1 ] ||
+  abort "This package is only for the OnePlus Nord 6 (CPH2793 / OP6135L1, project 24885)." "This phone: ${DEVICE:-unknown}, project ${PRJ:-unknown}."
+
+for t in lptools lpdump unzip zstd sha256sum blockdev getevent timeout awk head; do
+  command -v $t > /dev/null 2>&1 || abort "This recovery has no '$t'." "Use the Nord 6 TWRP to install this zip."
+done
+command -v bootctl > /dev/null 2>&1 || log "bootctl missing: the active slot is left as it is"
+[ -b /dev/block/by-name/super ] || abort "/dev/block/by-name/super not found."
+
+SLOT=$(getprop ro.boot.slot_suffix)
+case "$SLOT" in
+  _a) SLOTNUM=0; OTHER=_b ;;
+  _b) SLOTNUM=1; OTHER=_a ;;
+  *) abort "Unknown boot slot '$SLOT'." ;;
+esac
+ui_print "- Nord 6 ($DEVICE, project $PRJ), installing to slot ${SLOT#_}"
+
+LOGICAL=$(awk '$2 == "logical" { print $3 }' $TMP/images)
+HAS_INITBOOT=0
+while read -r _ kind name size sha <&3; do
+  [ "$kind" = raw ] || continue
+  [ "$name" = init_boot ] && HAS_INITBOOT=1
+  dev=/dev/block/by-name/$name$SLOT
+  [ -b "$dev" ] || abort "Partition $name$SLOT not found."
+  ge "$(blockdev --getsize64 "$dev")" "$size" || abort "$name.img ($size bytes) does not fit in $name$SLOT."
+done 3< $TMP/images
+
+# Firmware (modem, DSP, TrustZone, bootloader...) is never written: it stays from the OxygenOS build the
+# phone had. Compare it with the firmware the port was built and tested on, for information only.
+FWSTATE=
+if [ -s $TMP/firmware ]; then
+  ui_print "- Comparing the phone's firmware with $FWVER..."
+  FWDIFF=
+  FWMISSING=
+  while read -r _ name size sha <&3; do
+    dev=/dev/block/by-name/$name$SLOT
+    [ -b "$dev" ] || dev=/dev/block/by-name/$name
+    if [ ! -b "$dev" ]; then
+      FWMISSING="$FWMISSING $name"
+      continue
+    fi
+    got=$(head -c "$size" "$dev" | sha256sum | cut -d' ' -f1)
+    log "firmware $name: $got (reference $sha)"
+    [ "$got" = "$sha" ] || FWDIFF="$FWDIFF $name"
+  done 3< $TMP/firmware
+  [ -n "$FWMISSING" ] && log "firmware partitions not found:$FWMISSING"
+  if [ -z "$FWDIFF" ]; then
+    FWSTATE=same
+    ui_print "  Firmware matches $FWVER,"
+    ui_print "  the build this port was tested on."
+  else
+    FWSTATE=different
+    ui_print "  Firmware differs from $FWVER in:"
+    echo $FWDIFF | xargs -n 6 | while read -r line; do ui_print "    $line"; done
+    ui_print "  The port keeps the phone's firmware and usually"
+    ui_print "  works with other OxygenOS 16 builds. For the tested"
+    ui_print "  setup, install $FWVER first."
+  fi
+fi
+
+MS=$(timeout 15 bootctl get-snapshot-merge-status 2>/dev/null)
+log "snapshot merge status: ${MS:-unknown}"
+[ "$MS" = merging ] && abort "A system update is still being merged into this slot." "Boot Android, wait about 10 minutes for it to finish, then install this zip again."
+
+# Super layout -> one line per partition ("part name group bytes"), group sizes and super size.
+lpdump > $TMP/lpdump 2>&1 || { cat $TMP/lpdump >> $LOG; abort "lpdump could not read the super partition table."; }
+awk '
+  /^Partition table:/ { s = "p"; next }
+  /^Super partition layout:/ { s = "l"; next }
+  /^Block device table:/ { s = "b"; next }
+  /^Group table:/ { s = "g"; next }
+  s == "p" && $1 == "Name:" { n = $2; part[++np] = n; bytes[n] = 0 }
+  s == "p" && $1 == "Group:" { grp[n] = $2 }
+  s == "p" && $2 == ".." && $4 == "linear" { bytes[n] += ($3 - $1 + 1) * 512 }
+  s == "b" && $1 == "First" && $2 == "sector:" { first = $3 }
+  s == "b" && $1 == "Size:" { size = $2 }
+  s == "g" && $1 == "Name:" { g = $2 }
+  s == "g" && $1 == "Maximum" { printf "group %s %.0f\n", g, $3 }
+  END {
+    for (i = 1; i <= np; i++) printf "part %s %s %.0f\n", part[i], grp[part[i]], bytes[part[i]]
+    printf "super %.0f %.0f\n", first * 512, size
+  }' $TMP/lpdump > $TMP/layout
+cat $TMP/lpdump >> $LOG
+grep -q '^super [0-9]* [1-9]' $TMP/layout || abort "Could not parse the super partition table."
+
+# Partitions that go away: the other slot (super cannot hold two copies of the port), snapshot
+# COW partitions, scratch, and this slot's partitions that the package replaces. system$SLOT
+# is resized instead of removed: lptools puts new partitions into system$SLOT's group.
+HAS_SYSTEM=0
+echo "$LOGICAL" | grep -qx system && grep -q "^part system$SLOT " $TMP/layout && HAS_SYSTEM=1
+awk -v slot="$SLOT" -v other="$OTHER" -v list=" $(echo $LOGICAL) " '
+  $1 == "part" {
+    n = $2; base = n; sub(slot "$", "", base)
+    if (n ~ /-cow$/ || n == "scratch" || n ~ (other "$") || (n != "system" slot && n ~ (slot "$") && index(list, " " base " ")))
+      print n
+  }' $TMP/layout > $TMP/remove
+COWS=$(grep -c -- '-cow$' $TMP/remove)
+[ $HAS_SYSTEM = 1 ] || log "system$SLOT is not resized (not in package or missing)"
+
+# Free space check, before anything is removed.
+GROUP=$(awk -v p="system$SLOT" '$1 == "part" && $2 == p { print $3 }' $TMP/layout)
+[ -n "$GROUP" ] || GROUP=qti_dynamic_partitions$SLOT
+SPACE=$(awk -v grp="$GROUP" -v sys="system$SLOT" -v hassys=$HAS_SYSTEM '
+  FILENAME == ARGV[1] { gone[$1] = 1; next }
+  FILENAME == ARGV[2] && $1 == "img" && $2 == "logical" { need += int(($4 + 1048575) / 1048576) * 1048576; next }
+  FILENAME == ARGV[3] && $1 == "group" { max[$2] = $3; next }
+  FILENAME == ARGV[3] && $1 == "part" {
+    if (gone[$2] || (hassys && $2 == sys)) next
+    used += $4; if ($3 == grp) gused += $4; next
+  }
+  FILENAME == ARGV[3] && $1 == "super" { total = $3 - $2 }
+  END {
+    avail = total - used
+    if (max[grp] > 0 && max[grp] - gused < avail) avail = max[grp] - gused
+    printf "%.0f %.0f\n", need, avail
+  }' $TMP/remove $TMP/images $TMP/layout)
+NEED=${SPACE% *}
+AVAIL=${SPACE#* }
+log "group $GROUP, need $NEED, available $AVAIL"
+ge "$AVAIL" "$NEED" || abort "Not enough space in super: the images need $NEED bytes, $AVAIL are free." "Remove extra logical partitions (e.g. from an older ROM) or flash with flash_all.bat."
+
+if [ "${ZIP#/sideload}" = "$ZIP" ]; then
+  ui_print "- Checking the zip..."
+  unzip -tq "$ZIP" >> $LOG 2>&1 || abort "The zip is damaged (CRC error)." "Download or copy it again."
+fi
+
+# Android version of the system that is installed now, to tell whether data must be formatted.
+OLDSDK=
+OLDSYS=/dev/block/mapper/system$SLOT
+MAPPED=0
+if [ ! -b $OLDSYS ] && lptools map system$SLOT > $TMP/lpout 2>&1; then
+  MAPPED=1
+  OLDSYS=$(mapped_dev system$SLOT)
+fi
+mkdir -p $TMP/oldsys
+if [ -n "$OLDSYS" ] && mount -o ro "$OLDSYS" $TMP/oldsys 2>> $LOG; then
+  OLDSDK=$(sed -n 's/^ro.system.build.version.sdk=//p' $TMP/oldsys/system/build.prop 2>/dev/null | head -1)
+  umount $TMP/oldsys
+fi
+[ $MAPPED = 1 ] && lptools unmap system$SLOT >> $LOG 2>&1
+log "installed system sdk: ${OLDSDK:-unknown}, package sdk: ${NEWSDK:-unknown}"
+
+# ------------------------------------------------------------------ choices
+
+KEEP_INITBOOT=0
+if [ $HAS_INITBOOT = 1 ]; then
+  ui_print " "
+  ui_print "init_boot (root):"
+  ui_print "  Vol UP   = flash the port's stock init_boot"
+  ui_print "             (no root; use it for a first install)"
+  ui_print "  Vol DOWN = keep the current init_boot"
+  ui_print "             (keeps a Magisk / KernelSU root)"
+  ui_print "  No key within 30 s = stock init_boot"
+  if vol_key 30 0; then
+    ui_print "> Stock init_boot"
+  else
+    KEEP_INITBOOT=1
+    ui_print "> Keeping the current init_boot"
+  fi
+  ui_print " "
+fi
+
+TOTAL=$(awk -v keep=$KEEP_INITBOOT '$1 == "img" && !(keep && $3 == "init_boot") { t += $4 } END { printf "%.0f", t }' $TMP/images)
+DONE=0
+progress_add() {
+  DONE=$(awk -v d="$DONE" -v s="$1" 'BEGIN { printf "%.0f", d + s }')
+  set_progress "$(awk -v d="$DONE" -v t="$TOTAL" 'BEGIN { printf "%.3f", d / t }')"
+}
+
+# ------------------------------------------------------------------ super partition
+
+ui_print "- Releasing the partitions in super..."
+# Unmount and unmap everything recovery mapped from super, so lptools can rewrite the table.
+for p in $(awk '$1 == "part" { print $2 }' $TMP/layout); do
+  [ -e /dev/block/mapper/$p ] || continue
+  dm=$(readlink -f /dev/block/mapper/$p)
+  for mp in $(awk -v a="$dm" -v b="/dev/block/mapper/$p" '$1 == a || $1 == b { print $2 }' /proc/mounts); do
+    run umount "$mp" || run umount -l "$mp"
+  done
+  run lptools unmap $p || abort "Could not release $p." "Reboot recovery, do not mount system/vendor, and install again."
+done
+
+# What fastboot snapshot-update cancel does: drop the update state, so first-stage init does not
+# look for snapshots of partitions that no longer exist.
+if [ "$COWS" != 0 ] || [ -n "$MS" -a "$MS" != none ] || [ -e /metadata/ota/state ]; then
+  ui_print "- Cancelling a pending system update..."
+  mountpoint -q /metadata || mount /metadata 2>> $LOG || mount /dev/block/by-name/metadata /metadata 2>> $LOG
+  run rm -rf /metadata/ota/state /metadata/ota/snapshot-boot /metadata/ota/snapshots
+  [ -d /data/gsi/ota ] && run rm -rf /data/gsi/ota /metadata/gsi/ota
+fi
+
+ui_print "- Removing old partitions..."
+for p in $(cat $TMP/remove); do
+  run lptools remove $p || abort "Could not remove $p from super."
+done
+
+ui_print "- Writing logical partitions:"
+while read -r _ kind name size sha <&3; do
+  [ "$kind" = logical ] || continue
+  ui_print "  $name"
+  if [ $DRY = 1 ]; then
+    log "+ lptools create/resize $name$SLOT $size"
+  else
+    if [ $name = system ] && [ $HAS_SYSTEM = 1 ]; then
+      lptools resize system$SLOT $size >> $LOG 2>&1 || abort "Could not resize system$SLOT."
+      lptools map system$SLOT > $TMP/lpout 2>&1
+    else
+      lptools create $name$SLOT $size > $TMP/lpout 2>&1
+    fi
+    rc=$?
+    cat $TMP/lpout >> $LOG
+    [ $rc = 0 ] || abort "Could not create $name$SLOT in super." "$(grep -iv '^best group' $TMP/lpout | tail -1)"
+    dev=$(mapped_dev $name$SLOT)
+    [ -n "$dev" ] || abort "$name$SLOT was created but its block device did not appear."
+    flash_img $name "$dev" $size $sha || abort "Writing $name failed (damaged zip or storage error)." "The phone will not boot like this: install the zip again."
+    lptools unmap $name$SLOT >> $LOG 2>&1
+  fi
+  progress_add $size
+done 3< $TMP/images
+
+# ------------------------------------------------------------------ boot images
+
+ui_print "- Writing boot images:"
+while read -r _ kind name size sha <&3; do
+  [ "$kind" = raw ] || continue
+  if [ $name = init_boot ] && [ $KEEP_INITBOOT = 1 ]; then
+    ui_print "  init_boot (kept)"
+    continue
+  fi
+  ui_print "  $name"
+  flash_img $name /dev/block/by-name/$name$SLOT $size $sha || abort "Writing $name$SLOT failed." "The phone will not boot like this: install the zip again."
+  progress_add $size
+done 3< $TMP/images
+
+if command -v bootctl > /dev/null 2>&1; then
+  run timeout 15 bootctl set-active-boot-slot $SLOTNUM || log "set-active-boot-slot failed"
+  [ -n "$MS" ] && [ "$MS" != none ] && { run timeout 15 bootctl set-snapshot-merge-status none || log "set-snapshot-merge-status failed"; }
+fi
+
+# ------------------------------------------------------------------ data caches
+
+# Same clean-up as the dirty-flash step of flash_all.bat. Only possible when TWRP decrypted /data;
+# all of it is rebuilt by Android on the next boot.
+if [ -f /data/system/packages.xml ]; then
+  ui_print "- Clearing package, carrier and settings-search caches"
+  run rm -rf /data/system/package_cache/*
+  run rm -f /data/user_de/0/com.android.phone/files/carrierconfig-*.xml
+  si=/data/data/com.android.settings.intelligence
+  [ -d $si ] && run rm -f $si/databases/search_index.db $si/databases/search_index.db-journal $si/databases/search_index.db-wal $si/databases/search_index.db-shm $si/shared_prefs/indexing_manager.xml $si/shared_prefs/full_indexed_pkgs.xml
+fi
+
+sync
+set_progress 1
+ui_print " "
+ui_print "Done."
+if [ -n "$OLDSDK" ] && [ -n "$NEWSDK" ] && [ "$OLDSDK" != "$NEWSDK" ]; then
+  ui_print "!! The phone had another Android version before (SDK $OLDSDK)."
+  ui_print "!! Go to Wipe > Format Data, type yes, THEN reboot."
+  ui_print "!! It will not boot without formatting data."
+  ui_print "!! (This also erases internal storage.)"
+else
+  ui_print "Updating this port: data is kept, Reboot > System."
+  ui_print "Coming from anything else (OxygenOS, a custom ROM,"
+  ui_print "another port): first Wipe > Format Data, type yes,"
+  ui_print "then reboot."
+fi
+[ "$FWSTATE" = different ] && ui_print "Firmware is not $FWVER (see above)."
+[ $KEEP_INITBOOT = 0 ] && [ $HAS_INITBOOT = 1 ] && ui_print "Root: flash Magisk or KernelSU afterwards if you want it."
+[ $DRY = 1 ] && ui_print "(dry run - nothing was written; log: $LOG)"
+rm -rf $TMP
+exit 0

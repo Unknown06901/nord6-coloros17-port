@@ -541,6 +541,7 @@ def do_system_ext(se, base_se, tools, args):
     apk = se.path('priv-app/Settings/Settings.apk')
     guard(lambda: patches.patch_settings(apk, args.banner_text, LOG), 'Settings.apk patches', args.keep_going)
     guard(lambda: misc.patch_settings(apk, tools, args.work, LOG), 'Settings > Miscellaneous page', args.keep_going)
+    guard(lambda: misc.patch_anim_scale(apk, tools, args.work, LOG), 'Settings animation-scale box', args.keep_going)
     guard(lambda: misc.patch_settingsprovider(se.path('priv-app/SettingsProvider/SettingsProvider.apk'), tools,
                                               args.work, LOG), 'SettingsProvider (hide developer options)',
           args.keep_going)
@@ -638,6 +639,10 @@ def do_my_stock(ms, base_ms, keep_going):
     if os.path.exists(apk):
         guard(lambda: patches.patch_melody(apk, LOG, MELODY_VERSION_CODE), 'Melody.apk patches', keep_going)
         ms.remove('app/Melody/oat')
+    apk = ms.path('app/Aod/Aod.apk')
+    if os.path.exists(apk):
+        guard(lambda: patches.patch_aod(apk, LOG), 'Aod.apk patches', keep_going)
+        ms.remove('app/Aod/oat')
     debloat(ms)
 
 
@@ -701,7 +706,7 @@ def do_my_product(mp, base_mp, donor_prj):
 
     ext = mp.path('etc/extension')
     xml_edit(os.path.join(ext, 'com.oplus.app-features.xml'), lambda s: _app_features(s),
-             'app-features: wireless charging and all-day panoramic AOD (LTPO only) removed, battery health added')
+             'app-features: wireless charging and all-day panoramic AOD removed, battery health added')
     xml_edit(os.path.join(ext, 'feature_com.android.battery.xml'),
              lambda s: re.sub(r'^(?:[ \t]*<!--[^\n]*wireless[^\n]*-->\n)?[ \t]*<app_feature name="oplus\.power\.onwirelesscharger\.support"\s*/>\n',
                               '', s, flags=re.M | re.I),
@@ -824,10 +829,41 @@ def radio_feature_parity(path, base_path, rel):
     LOG('%s: radio/wlan features = base (%d donor-only removed, %d added)' % (rel, dropped, len(add)))
 
 
+# Nord 6 display driver (msm_drm OFP, oplus_onscreenfingerprint.c in OnePlus's sm8735 nord_6 source) has
+# a full-screen AOD mode: panel stays out of LP1 command mode and the "aod layer exist, filter backlight"
+# rule is skipped, so doze brightness reaches the panel. It's gated by the panel DT property
+# oplus,ofp-longrui-aod-config (bit 0x4 full screen, 0x8 full screen all day), which base leaves out
+# (reads 0x0). SystemUI reads the same value as panel feature 217 and sends the mode itself.
+LONGRUI_AOD_CONFIG = 0xC
+
+
+def patch_dtbo(path):
+    import struct
+    import dtbo
+
+    def edit(fdt):
+        n = 0
+        for _, node in fdt.walk():
+            name = dtbo.prop(node, 'qcom,mdss-dsi-panel-name') or b''
+            # the Nord 6 panel (AA610 A0034, P 3 and P 7 sources); the same dtbo also carries other
+            # devices' panels (e.g. AC274 A0026), which are left alone
+            if b'A0034' in name and dtbo.prop(node, 'oplus,ofp-fp-type') is not None \
+                    and dtbo.prop(node, 'oplus,ofp-longrui-aod-config') is None:
+                dtbo.set_prop(node, 'oplus,ofp-longrui-aod-config', struct.pack('>I', LONGRUI_AOD_CONFIG),
+                              after='oplus,ofp-fp-type')
+                n += 1
+        return n > 0
+    n = dtbo.edit_dtbo(path, path, edit)
+    if not n:
+        raise RuntimeError('dtbo: no OFP video-mode panel node found')
+    LOG('dtbo: full-screen + all-day AOD capability (longrui_aod_config 0x%x) added to panel nodes in %d overlays'
+        % (LONGRUI_AOD_CONFIG, n))
+
+
 def _app_features(s):
     s = re.sub(r'^[ \t]*<app_feature name="[^"]*wireless[^"]*"[^\n]*\n', '', s, flags=re.M | re.I)
-    # all-day panoramic AOD holds the wallpaper on screen around the clock, which needs an LTPO panel
-    # dropping to 1 Hz; the Nord 6 LTPS panel would sit at 60 Hz all day. Base declares only the timed one.
+    # base doesn't declare all-day panoramic either; it isn't needed: all-day panoramic AOD is gated by the
+    # panel capability the port adds to dtbo (longrui_aod_config 0xC, see patch_dtbo). Kept as base.
     s = re.sub(r'^[ \t]*<app_feature name="com\.oplus\.systemui\.panoramic_aod_all_day\.enable"[^\n]*\n', '', s, flags=re.M)
     if 'os.charge.settings.batterysettings.batteryhealth' not in s:
         i = s.index('<app_feature')
@@ -1082,6 +1118,7 @@ def main():
     for p in TAKE_FROM_BASE:
         shutil.copy2(img('base', p), args.out)
         LOG('%-15s <- base' % p)
+    patch_dtbo(os.path.join(args.out, 'dtbo.img'))
     for p in TAKE_FROM_DONOR:
         if os.path.exists(img('donor', p)):
             shutil.copy2(img('donor', p), args.out)

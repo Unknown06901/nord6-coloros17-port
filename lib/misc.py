@@ -738,3 +738,70 @@ def patch_settings(apk, tools, work, log):
     add_stored_entry(apk, nxt, dex)
     log('Miscellaneous: page code added to Settings as %s (%d bytes, %d rows)' % (nxt, len(dex), len(SPECS)))
     log('Miscellaneous: Settings top-level row ' + insert_top_level_row(apk))
+
+
+# ------------------------------------------------------------------ Developer options animation scales
+ANIM_HELPER = 'Lcom/android/settings/portmisc/AnimScale;'
+ANIM_CONTROLLERS = ['Lcom/android/settings/development/%s;' % c for c in (
+    'WindowAnimationScalePreferenceController', 'TransitionAnimationScalePreferenceController',
+    'AnimatorDurationScalePreferenceController')]
+ANIM_BODIES = {
+    '.method public updateState(Landroidx/preference/Preference;)V':
+        '    .registers 2\n\n'
+        '    invoke-static {p1}, %s->refresh(Landroidx/preference/Preference;)V\n\n'
+        '    return-void\n' % ANIM_HELPER,
+    '.method public onPreferenceChange(Landroidx/preference/Preference;Ljava/lang/Object;)Z':
+        '    .registers 3\n\n'
+        '    invoke-static {p1, p2}, %s->onChange(Landroidx/preference/Preference;Ljava/lang/Object;)Z\n\n'
+        '    move-result p0\n\n'
+        '    return p0\n' % ANIM_HELPER,
+}
+
+
+def anim_scale_smali(smali_file):
+    """Hand updateState / onPreferenceChange of one animation-scale controller to AnimScale (in the
+    Miscellaneous dex): custom number box, nothing below 0.5x."""
+    s = open(smali_file, encoding='utf8').read()
+    if 'getAnimationScale(I)F' not in s or 'setAnimationScale(IF)V' not in s:
+        raise PatchError(os.path.basename(smali_file) + ': not an animation-scale controller')
+    for sig, body in ANIM_BODIES.items():
+        pat = re.compile(r'(?ms)^' + re.escape(sig) + r'\n.*?^\.end method')
+        if len(pat.findall(s)) != 1:
+            raise PatchError('%s: %s not found once' % (os.path.basename(smali_file), sig))
+        s = pat.sub(lambda m: sig + '\n' + body + '.end method', s)
+    open(smali_file, 'w', encoding='utf8').write(s)
+
+
+def patch_anim_scale(apk, tools, work, log):
+    z = ZipFile(apk)
+    names = sorted(n for n in z.entries if re.fullmatch(r'classes\d*\.dex', n))
+    dexes = {n: Dex(z.read(n)) for n in names}
+    if not any(d.has_class(ANIM_HELPER) for d in dexes.values()):
+        raise PatchError('AnimScale helper missing (Miscellaneous dex not added)')
+    where = {}
+    for cls in ANIM_CONTROLLERS:
+        hit = [n for n, d in dexes.items() if d.has_class(cls)]
+        if len(hit) != 1:
+            raise PatchError('%s in %d dex files' % (cls, len(hit)))
+        where[cls] = hit[0]
+    tmp = tempfile.mkdtemp(dir=work)
+    replace = {}
+    try:
+        for target in sorted(set(where.values())):
+            dexf = os.path.join(tmp, target)
+            open(dexf, 'wb').write(z.read(target))
+            out = os.path.join(tmp, 'smali_' + target)
+            subprocess.run(['java', '-jar', tools['baksmali'], 'd', '-j', '8', '-o', out, dexf], check=True,
+                           stdout=subprocess.DEVNULL)
+            for cls in ANIM_CONTROLLERS:
+                if where[cls] == target:
+                    anim_scale_smali(os.path.join(out, cls[1:-1] + '.smali'))
+            newdex = os.path.join(tmp, 'new_' + target)
+            subprocess.run(['java', '-jar', tools['smali'], 'a', '--api', '28', '-j', '1', '-o', newdex, out],
+                           check=True, stdout=subprocess.DEVNULL)
+            replace[target] = open(newdex, 'rb').read()
+        replace_entries_keep_sigblock(apk, replace)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    log('Settings: Developer options animation scales: custom number box, minimum 0.5x, "off" removed (%s)'
+        % ', '.join(sorted(set(where.values()))))

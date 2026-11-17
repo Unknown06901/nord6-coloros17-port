@@ -59,28 +59,50 @@ def settings_hide_software_update_row(dex):
 
 # ------------------------------------------------------------------ SystemUI.apk
 
-def systemui_seamless_aod(dex):
-    """Seamless AOD style: base HAL returns panel feature 217 = 0, so SystemUI drops
-    isSupportSmoothTransition. In the 'get feature error' path store the method's
-    constant-true register instead of false."""
+def _smooth_transition_force_true(dex, field):
+    """initSmoothTransitionState: make every store to `field` (normal path, where the flag comes from
+    a bit of panel feature 217, and the 'get feature error' path) use the method's constant-true
+    register instead."""
     ins = dex.insns('Lcom/oplus/systemui/aod/display/SmoothTransitionController;', 'initSmoothTransitionState')
-    err = find_one([k for k, x in enumerate(ins) if x.op in (0x1a, 0x1b) and 'get feature error' in x.ref()],
-                   'initSmoothTransitionState error string')
-    k = next((k for k in range(err, len(ins)) if ins[k].op == 0x5c
-              and ins[k].ref().endswith('->isSupportSmoothTransition:Z')), None)
-    if k is None:
-        raise PatchError('isSupportSmoothTransition store not found')
-    one = None
-    for j, x in enumerate(ins[:err]):
-        if x.op == 0x12 and x.b4 == 1:
-            one = (j, x.a4)
-            break
-    if one is None:
-        raise PatchError('no const/4 vX, 0x1 before the error path')
+    sites = [k for k, x in enumerate(ins) if x.op == 0x5c and x.ref().endswith('->%s:Z' % field)]
+    if len(sites) != 2:
+        raise PatchError('%s: expected 2 stores (feature bit + error path), found %d' % (field, len(sites)))
+    one = next(((j, x.a4) for j, x in enumerate(ins) if x.op == 0x12 and x.b4 == 1), None)
+    if one is None or one[0] > sites[0]:
+        raise PatchError('no const/4 vX, 0x1 before the %s stores' % field)
     j, reg = one
-    if any(reg in dest_regs(x) for x in ins[j + 1:k]):
-        raise PatchError('v%d is overwritten before the error path' % reg)
-    dex.d[ins[k].off + 1] = (dex.d[ins[k].off + 1] & 0xf0) | reg
+    for k in sites:
+        if any(reg in dest_regs(x) for x in ins[j + 1:k]):
+            raise PatchError('v%d is overwritten before a %s store' % (reg, field))
+        dex.d[ins[k].off + 1] = (dex.d[ins[k].off + 1] & 0xf0) | reg
+
+
+def systemui_seamless_aod(dex):
+    """Seamless AOD style = panel feature 217 bit 0x2 (kernel longrui_aod_config "a mirror to the end",
+    black frames removed by the panel). The port's dtbo declares only 0xC (full screen + all day, see
+    patch_dtbo in build_port), so force isSupportSmoothTransition on in both paths. Seamless has
+    worked this way since the start without the kernel side."""
+    _smooth_transition_force_true(dex, 'isSupportSmoothTransition')
+
+
+def systemui_videomode_aod_hide(cls):
+    """onEnergySavingNotifyHide hides the AOD when energy saving is on, when it is timed panoramic,
+    or when the panel is video mode (`oplus.software.display.video_mode_aod_support`), so on the
+    Nord 6 nothing could stay on in "always on" / scheduled mode. Drop only the video-mode clause:
+    `invoke-static isVideoModeAodSupport; move-result vX` -> `const/4 vX, 0; nop*3`. Energy-saving and
+    timed panoramic still hide."""
+    def fn(dex):
+        ins = dex.insns(cls, 'onEnergySavingNotifyHide')
+        hits = [k for k, x in enumerate(ins) if x.op == 0x71
+                and x.ref() == 'Lcom/oplusos/systemui/common/feature/AodFeatureOption;->isVideoModeAodSupport()Z'
+                and _next(ins, k) is not None and _next(ins, k).op == 0x0a
+                and any((y.ref() or '').endswith('->isCurrentEnergySavingOpen()Z') for y in ins[max(0, k - 12):k])]
+        k = find_one(hits, cls.split('/')[-1] + ' video-mode hide')
+        reg = ins[k + 1].aa
+        if reg > 15:
+            raise PatchError('register v%d too high for const/4' % reg)
+        dex.d[ins[k].off:ins[k].off + 8] = bytes([0x12, reg]) + b'\0' * 6
+    return fn
 
 
 def systemui_timeout_aod(dex):
@@ -411,6 +433,45 @@ def melody_realme_whitelist(dex, checks):
 
 # ------------------------------------------------------------------ drivers
 
+def aod_show_display_mode(dex):
+    """AOD app (com.oplus.aod, obfuscated): it hides the display-mode picker (energy saving / scheduled /
+    always on) when `oplus.software.disable_aod_all_day_mode` or `oplus.software.display.video_mode_aod_support`
+    is declared; the Nord 6 has the second. The two are folded into one static boolean with a plain getter
+    (`sget-boolean vX, F; return vX`) -> `const/4 vX, 0; nop; return vX`. Returns False if not in this dex."""
+    want = {'oplus.software.display.video_mode_aod_support', 'oplus.software.disable_aod_all_day_mode'}
+    fields = set()
+    for sig, off, units in dex.methods(None):
+        ins = dex.insns_at(off, units)
+        prev = 0                                   # the flag is computed between the previous sput and its own
+        for k, x in enumerate(ins):
+            if x.op == 0x6a:
+                if want <= {y.ref() for y in ins[prev:k] if y.op in (0x1a, 0x1b)}:
+                    fields.add(x.ref())
+                prev = k + 1
+    if not fields:
+        return False
+    field = find_one(sorted(fields), 'AOD all-day-mode-disabled flag')
+    cls = field.split('->')[0]
+    getters = []
+    for sig, off, units in dex.methods(cls):
+        if units != 3:
+            continue
+        ins = dex.insns_at(off, units)
+        if len(ins) == 2 and ins[0].op == 0x63 and ins[0].ref() == field and ins[1].op == 0x0f \
+                and ins[1].aa == ins[0].aa:
+            getters.append(ins[0])
+    x = find_one(getters, 'AOD all-day-mode-disabled getter')
+    if x.aa > 15:
+        raise PatchError('register v%d too high for const/4' % x.aa)
+    dex.d[x.off:x.off + 4] = bytes([0x12, x.aa, 0, 0])
+    return True
+
+
+def patch_aod(apk, log):
+    patch_any_dex_in_zip(apk, aod_show_display_mode, 'AOD display-mode picker')
+    log('AOD app: display-mode picker shown (energy saving / scheduled / always on)')
+
+
 def patch_melody(apk, log, version_code=None):
     z = ZipFile(apk)
     checks = set()
@@ -452,10 +513,14 @@ def patch_settings(apk, banner_text, log):
 def patch_systemui(apk, log):
     patch_dex_in_zip(apk, 'Lcom/oplus/systemui/aod/display/SmoothTransitionController;',
                      systemui_seamless_aod, 'seamless aod')
-    log('SystemUI: Seamless AOD enabled')
+    log('SystemUI: Seamless AOD enabled (both feature paths)')
     patch_dex_in_zip(apk, 'Lcom/oplus/systemui/keyguard/OplusKeyguardViewMediatorExImpl;',
                      systemui_timeout_aod, 'timeout aod')
     log('SystemUI: screen-timeout AOD like power button')
+    for cls in ('Lcom/oplus/systemui/aod/controller/PanoramicAodController;',
+                'Lcom/oplus/systemui/aod/controller/BaseAodClockLayoutController;'):
+        patch_dex_in_zip(apk, cls, systemui_videomode_aod_hide(cls), 'video-mode aod hide')
+    log('SystemUI: AOD can stay on in always-on/scheduled mode (video-mode force-hide dropped)')
     # carrier label on lock screen was ~2 px low: paddingBottom 1.3359dip (4 px) on its RelativeLayout
     r = insert_xml_attr(apk, 'res/layout/keyguard_status_bar.xml', 'RelativeLayout', 0x010103b7,
                         0x010100d9, 0x05, 0xab11)

@@ -45,7 +45,8 @@ It builds a ColorOS 17 port ROM for the **OnePlus Nord 6** from two official fir
 | Donor | OnePlus 15 (ColorOS 17, Android 17) | CPH2745, OP611FL1, project 24863 | SM8850 | `CPH2745_11.C.75_1750_202610181120` (17.0.0.102 EX01); C.80 (17.0.1.201 EX01) builds cleanly, see note below |
 
 The Nord 6 panel is a **165 Hz LTPS video-mode panel** (`AA610_P_3_A0034_dsc_video_mode_panel`), not LTPO. It
-can't refresh at 1 Hz, so donor features that need LTPO (all-day panoramic AOD and similar) must stay off.
+can't refresh at 1 Hz, so donor features that need LTPO must stay off. Panoramic and all-day AOD work through
+the driver's full-screen AOD mode, enabled by the port's dtbo edit (see Decisions).
 
 `build_port.py` takes the base's boot chain, kernel, vendor and odm, and the donor's system partitions. It then
 applies every fix that was made and tested on a real phone. Each code patch finds its target by class,
@@ -104,7 +105,7 @@ lines you can't explain.
 | `build_port.py` | The whole build: partition plan, per-partition steps (`do_vendor`, `do_odm`, `do_system`, `do_system_ext`, `do_my_product`, `do_my_stock`, `do_my_manifest`), `DEBLOAT` list, image packing |
 | `lib/patches.py` | Code patches for Settings, SystemUI and `oplus-services.jar` (each function's docstring says what and why) |
 | `lib/dexpatch.py` | Same-size dex patching inside apk/jar, `resources.arsc` string edits, binary-XML attribute insert |
-| `lib/misc.py`, `assets/misc/` | Settings > Miscellaneous page (appended dex + top-level row) and its back ends: services.jar, framework.jar (smali 3, `PortSpoof`), SettingsProvider.apk (`PortDevHide`), app-readable props, Photos sysconfig |
+| `lib/misc.py`, `assets/misc/` | Settings > Miscellaneous page (appended dex + top-level row), Developer options animation-scale box (`AnimScale`) and its back ends: services.jar, framework.jar (smali 3, `PortSpoof`), SettingsProvider.apk (`PortDevHide`), app-readable props, Photos sysconfig |
 | `lib/subsysradio.py` | Renumbers the donor's subsys_radio HAL calls to the Nord 6 HAL version |
 | `make_recovery_zip.py`, `assets/recovery/` | TWRP zip builder and its installer script |
 | `assets/flash_all.bat`, `assets/ksu_root.ps1` | Windows flasher (clean/dirty flash, log collection) and the KernelSU Next init_boot patcher |
@@ -201,19 +202,32 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
 - **UniRender is off** (it caused banded screenshots). **WCG 2.0 is off.** The display configs come from base,
   plus the 165 Hz option.
 - **AOD:**
-  - The Seamless AOD style works because of `systemui_seamless_aod`.
-  - All-day panoramic AOD is removed; it needs LTPO.
-  - The AOD "display mode" section (energy saving / scheduled / always) is hidden on purpose by the AOD app
-    on video-mode panels. Stock Nord 6 hides it too.
-  - The AOD runs in energy-saving mode (`Setting_AodUserEnergySavingSet=2`, chosen because the device has
-    `aod_prevent_burn_support`). It hides a few seconds after the last trigger (lift or notification) and
-    comes back when the phone is picked up. The wake sensor is a tilt/pick-up sensor, so shaking does
-    nothing. Stock Nord 6 has the same feature flags.
-  - **Timed panoramic (full-screen) AOD was tested on 2026-11-06 and not adopted.** Forcing panel feature
-    217 bit 0x4 in `SmoothTransitionController.initSmoothTransitionState` (like the seamless patch) makes it
-    selectable and it renders. But in energy-saving mode it turns the screen fully off after about 5 s,
-    there's no fallback to the clock AOD, and the user found it confusing. An unexplored lead for an
-    always-on clock AOD is `Setting_AodAlwaysDisplay`, the option the AOD app hides on this panel.
+  - **Full-screen AOD comes from the panel device tree (2026-11-17, tested on device).** The Nord 6 display
+    driver (`msm_drm.ko`, OFP code = `oplus_onscreenfingerprint.c` in OnePlusOSS
+    `android_kernel_modules_and_devicetree_oneplus_sm8735`, branch `oneplus/sm8735_b_16.0.0_nord_6`) has a
+    full-screen AOD mode: no `lp1-command`, and the "aod layer exist, filter backlight" rule is skipped, so the
+    doze brightness reaches the panel. It needs panel DT property `oplus,ofp-longrui-aod-config` (bit 0x4 full
+    screen, 0x8 full screen all day). Base leaves it out (reads 0x0). `build_port.patch_dtbo` adds `<0xC>` to the
+    AA610 A0034 panel nodes in every dtbo overlay (`lib/dtbo.py`, pure-Python FDT editor). Other panels in the same
+    dtbo (e.g. AC274 A0026) are left alone. vbmeta flags 3 means the stale dtbo AVB hash doesn't matter.
+  - SystemUI reads the same value as panel feature 217 (0x2 seamless, 0x4 panoramic, 0x8 all day, 0x1 inverse of
+    gotoDozeWithOff) and sends the mode back itself (`setDisplayStateByCurrentAodStyleType`: 4 = panoramic, via the
+    displaypanelfeature HAL -> `PANEL_IOCTL_SET_LONGRUI_AOD`). So panoramic and all-day need no SystemUI flag patch.
+  - Seamless (bit 0x2, kernel "a mirror to the end") is not claimed in DT: the kernel would then run its own
+    AOD-off handling, which this panel may not support. `systemui_seamless_aod` forces the SystemUI flag in both
+    paths of `initSmoothTransitionState` instead. It has to cover the normal path because 217 is no longer 0.
+  - Display modes: the AOD app hides its energy saving / scheduled / always-on picker on video-mode panels
+    (`aod_show_display_mode`, one static flag = `disable_aod_all_day_mode || video_mode_aod_support`).
+    `systemui_videomode_aod_hide` drops the video-mode clause from both `onEnergySavingNotifyHide` methods, so
+    "always on" and scheduled can stay on. Energy saving still hides about 5 s after the last lift/notification
+    and comes back on lift (tilt/pick-up sensor, shaking does nothing).
+  - The old symptoms were all the backlight filter: without full-screen mode the panel kept only the brightness
+    it had while on (so the first AOD after locking was visible), went black about 5 s in, and a re-show after
+    the panel had been off started at backlight 0 (black on lift). Don't go back to forcing panel bits in
+    SystemUI or clearing SurfaceFlinger's panoramic flag (`service call SurfaceFlinger 23332`): neither changes the
+    kernel path.
+  - The app feature `com.oplus.systemui.panoramic_aod_all_day.enable` is not needed (base doesn't have it, all-day
+    works without it).
 - **Earbuds (Melody, `com.oplus.melody`):**
   - Melody's built-in model whitelist (`res/raw/melody_app_whitelist.json`, AES-GCM, key = SHA-256 of the
     signing certificate) has OPPO, OnePlus and realme models. While loading, it drops realme models unless
@@ -243,6 +257,13 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   - toybox `chcon` has no `--reference`; use `chcon $(stat -c %C <file>)`.
   - `OplusSubSettings`/`SubSettings` accept any fragment, so a new Settings page needs no manifest change; a new
     dex can be appended to Settings.apk ahead of its signing block.
+- **Animation-scale box (2026-11-17):** 0x ("Animation off") hangs SystemUI on this port, so the Developer options
+  lists drop every entry below 0.5 and gain "Custom…" (value `custom`) with a 0.5–10 number box. `AnimScale` lives in
+  the Miscellaneous dex, so `patch_anim_scale` must run after `misc.patch_settings`; it rewrites only the bodies of
+  `updateState` and `onPreferenceChange` in the three `development/*ScalePreferenceController` classes (classes.dex,
+  baksmali 2.5.2 is fine there). `onChange` always returns false and `refresh` sets the shown value. Only the
+  Settings UI is gated: accessibility "Remove animations" and `settings put global` can still write 0.
+  Verified on the phone: 1.5x applied to all three Global keys (a higher scale is slower, as on any Android).
 - **Miscellaneous page (2026-11-15, Lunaris AOSP as reference):** each switch was checked on the phone with a test
   module (secure-app screenshot in PhonePe, recording kept through lock, SearchSelector 7955 -> 7171 downgrade,
   Photos "This CPH2793 can back up unlimited photos and videos at no charge").

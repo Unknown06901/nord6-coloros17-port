@@ -132,7 +132,7 @@ while read -r _ kind name size sha <&3; do
   ge "$(blockdev --getsize64 "$dev")" "$size" || abort "$name.img ($size bytes) does not fit in $name$SLOT."
 done 3< $TMP/images
 
-# Firmware (modem, DSP, TrustZone, bootloader...) is never written: it stays from the OxygenOS build the
+# Firmware (modem, DSP, TrustZone, bootloader...) is never written: it stays from the stock build the
 # phone had. Compare it with the firmware the port was built and tested on, for information only.
 FWSTATE=
 if [ -s $TMP/firmware ]; then
@@ -160,7 +160,7 @@ if [ -s $TMP/firmware ]; then
     ui_print "  Firmware differs from $FWVER in:"
     echo $FWDIFF | xargs -n 6 | while read -r line; do ui_print "    $line"; done
     ui_print "  The port keeps the phone's firmware and usually"
-    ui_print "  works with other OxygenOS 16 builds. For the tested"
+    ui_print "  works with other stock builds. For the tested"
     ui_print "  setup, install $FWVER first."
   fi
 fi
@@ -368,7 +368,7 @@ if [ -n "$OLDSDK" ] && [ -n "$NEWSDK" ] && [ "$OLDSDK" != "$NEWSDK" ]; then
   ui_print "!! (This also erases internal storage.)"
 else
   ui_print "Updating this port: data is kept, Reboot > System."
-  ui_print "Coming from anything else (OxygenOS, a custom ROM,"
+  ui_print "Coming from anything else (stock firmware, a custom ROM,"
   ui_print "another port): first Wipe > Format Data, type yes,"
   ui_print "then reboot."
 fi

@@ -4,7 +4,7 @@ AI agents (Gemini CLI, Antigravity, Claude Code, Codex, ...): read [AGENTS.md](A
 
 `build_port.py` rebuilds the flashable port from scratch:
 
-- **Base**: stock Nord 6 OxygenOS 17 images in `../base/images` (currently 17.0.0.100).
+- **Base**: stock Nord 6 ColorOS 17 images in `../base/images` (currently 17.0.0.100). From version 17 OPPO, OnePlus and realme all ship ColorOS; there is no OxygenOS 17.
 - **Donor**: a ColorOS 17 build. It can be an images folder, a `payload.bin`, or a full OTA `.zip`.
 
 The script applies every fix that was made and tested on the device. Each code patch finds
@@ -40,7 +40,7 @@ The output is all images, `flash_all.bat`, `ksu_root.ps1` and `BUILD_REPORT.txt`
 the donor fingerprint and the total size of the logical partitions. Flash from Windows with
 `flash_all.bat`, which asks for the mode first:
 
-- Clean flash: for a first install (from OxygenOS or any other ROM). Needs the full image set, flashes
+- Clean flash: for a first install (from stock OxygenOS 16 / ColorOS 17 or any other ROM). Needs the full image set, flashes
   everything and wipes data at the end. It asks Root with KernelSU Next or No root.
 - Dirty flash: for updating a phone that already runs this port. Flashes only the `.img` files in the
   folder and keeps data, so a fix package can contain just the changed images (for example only
@@ -101,7 +101,7 @@ fastbootd, with TWRP's own `lptools`, `lpdump`, `zstd`, `unzip` and `bootctl`:
    It also compares the phone's firmware (modem, dsp, tz, xbl, abl and the other 24 firmware partitions of the
    base OTA, sha256 from `--firmware-ref`, default `../base/images`) with the base build, and says whether
    it matches. This is information only. The zip never writes firmware, so the phone keeps the firmware of
-   whatever OxygenOS it had, so the phone keeps the firmware of whatever OxygenOS it had. OxygenOS 16.0.5.1300 firmware is fine for the 17.0.0.100 base: same GKI kernel build (6.6.118-android15-8, ab15863337), same Android 15 vendor freeze, KeyMint v3 and vendor patch level 2026-10-01 on both, so the firmware check reports "differs" but nothing depends on it.
+   whatever stock build it had (OxygenOS 16 or ColorOS 17). OxygenOS 16.0.5.1300 firmware is fine for the ColorOS 17.0.0.100 base: same GKI kernel build (6.6.118-android15-8, ab15863337), same Android 15 vendor freeze, KeyMint v3 and vendor patch level 2026-10-01 on both, so the firmware check reports "differs" but nothing depends on it.
 2. Asks with the volume keys: Vol UP flashes the port's stock init_boot, Vol DOWN keeps the current init_boot
    and with it Magisk/KernelSU root. With no key in 30 s it flashes the stock one.
 3. Unmaps whatever recovery mapped from super. If an OTA was pending it cancels it, the same as
@@ -114,7 +114,7 @@ fastbootd, with TWRP's own `lptools`, `lpdump`, `zstd`, `unzip` and `bootctl`:
    active.
 5. If TWRP decrypted /data, it clears the package cache, carrier config cache, Settings search index and system sounds index (the
    dirty-flash clean-up of `flash_all.bat`, no root needed here).
-6. It compares the installed system's SDK level with the zip's. If they differ (OxygenOS 16 -> port), it
+6. It compares the installed system's SDK level with the zip's. If they differ (stock OxygenOS 16 / ColorOS 17 -> port), it
    says Wipe > Format Data is required before rebooting. TWRP's Format Data also deletes the metadata
    encryption key, like `fastboot -w`.
 
@@ -126,7 +126,7 @@ the slot are kept. For a dry run that checks everything and writes nothing, run 
 After a change to the installer only, `--reuse OLD.zip` copies every image whose sha256 is unchanged from the
 earlier zip instead of compressing it again (minutes instead of ~15).
 
-For **building**, the base should be the Nord 6 OxygenOS 17 build this kit was verified on (OxygenOS 17.0.0.100,
+For **building**, the base should be the Nord 6 ColorOS 17 build this kit was verified on (ColorOS 17.0.0.100,
 `CPH2793export_11_17.0.0.100(EX01)`, security patch 2026-10-01; OxygenOS 16 bases are no longer supported since 2026-11-18): the odm
 colour calibration in `assets/` equals the 17.0.0.100 file plus the six `24811_*` render intents the donor's colour modes use. With another base the build warns; compare that file first. The donor is a
 ColorOS 17 build for the OnePlus 15 (CPH2745, SM8850; verified with `CPH2745_11.C.75_1750_202610181120`; also builds cleanly from `CPH2745_11.C.80_1800_202610290517` / 17.0.1.201). The

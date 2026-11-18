@@ -235,7 +235,7 @@ GOOGLE_MINIMAL = {
         'del-app-pre/GoogleHome', 'del-app-pre/GoogleOne', 'del-app-pre/Videos_del', 'del-app-pre/YTMusic_del',
     ],
 }
-VERIFIED_BASE = 'CPH2793export_11_17.0.0.100(EX01)_2026111118150000'   # OxygenOS 17 since 2026-11-18 (was 16.0.5.1300)
+VERIFIED_BASE = 'CPH2793export_11_17.0.0.100(EX01)_2026111118150000'   # ColorOS 17 since 2026-11-18 (was OxygenOS 16.0.5.1300)
 
 
 # ---------------------------------------------------------------- helpers
@@ -603,7 +603,7 @@ def xml_edit(path, fn, what):
         LOG('(no change) ' + what)
 
 
-# Ringtones / notification sounds. OxygenOS 17 (base) ships them as plain my_product/res/audio/{ringtones,
+# Ringtones / notification sounds. ColorOS 17 (base) ships them as plain my_product/res/audio/{ringtones,
 # notifications}. The donor (OnePlus 15) ships them only as res/audio/haptic_ringtone/output<F>HZ/..., one set
 # per vibration-motor resonance picked from its ro.oplus.haptic.* props. Those props are removed (Nord 6 motor
 # differs), so no set matched and the sound pickers were empty. Nord 6 = base sounds, no haptic sets.
@@ -1024,7 +1024,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     legacy = lambda *p: os.path.join(PORT, *p) if os.path.isdir(os.path.join(PORT, *p)) else None  # noqa: E731
     ap.add_argument('--base', default=legacy('base', 'images'),
-                    help='stock Nord 6 OxygenOS 16: images dir, payload.bin, OTA zip or fastboot zip')
+                    help='stock Nord 6 ColorOS 17: images dir, payload.bin, OTA zip or fastboot zip')
     ap.add_argument('--donor', default=legacy('donor', 'images'),
                     help='ColorOS 17 donor: images dir, payload.bin, OTA zip or fastboot zip')
     ap.add_argument('--out', default='out_port', help='output dir (flashable), default ./out_port')

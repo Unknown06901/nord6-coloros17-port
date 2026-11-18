@@ -23,13 +23,13 @@ echo ========================================================
 echo   The port is flashed from the FastbootD of the TWRP recovery bundled in this folder
 echo   ^(twrp_nord6.img^). It is installed first and stays as your recovery.
 echo.
-echo   1. Clean flash - first install (coming from OxygenOS or any other ROM).
+echo   1. Clean flash - first install (from stock OxygenOS 16 / ColorOS 17 or any other ROM).
 echo      Flashes everything and WIPES ALL DATA.
 echo.
 echo   2. Dirty flash - update a phone that already runs this port.
 echo      Flashes only the .img files in this folder and KEEPS your data,
 echo      so a fix package can contain just the patched images.
-echo      Do NOT use this coming from OxygenOS: it will not boot without a wipe.
+echo      Do NOT use this coming from stock firmware or another ROM: it will not boot without a wipe.
 echo.
 echo   3. Collect logs - the phone does not boot, or something is wrong after flashing.
 echo      Saves phone info and logs to a zip file you can send to the developer.
@@ -126,7 +126,7 @@ findstr /c:"is-userspace: yes" "%RUNOUT%" >nul && (
         goto :abort
     )
 )
-REM vbmeta first: coming from stock OxygenOS, AVB verification is still on and could refuse the
+REM vbmeta first: coming from stock firmware, AVB verification is still on and could refuse the
 REM non-stock recovery.
 for %%p in (vbmeta vbmeta_system vbmeta_vendor) do (
     if exist "%%p.img" call :run fastboot --disable-verity --disable-verification flash %%p %%p.img || set FLASH_FAILED=1
@@ -222,7 +222,7 @@ echo.
 call :say [5/5] Flashing Complete. TWRP stays installed as the recovery.
 if "%MODE%"=="dirty" goto :dirty
 
-echo IMPORTANT: Switching from OxygenOS 16 to ColorOS 17 requires a Data Wipe (fastboot -w).
+echo IMPORTANT: A clean flash of the port requires a Data Wipe (fastboot -w).
 echo Press any key to wipe data and reboot, or close this window to skip wiping.
 pause
 call :run fastboot -w || (

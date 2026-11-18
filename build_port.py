@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """OnePlus Nord 6 ColorOS 17 port builder.
 
-Base  = stock Nord 6 OxygenOS 16 images (verified: 16.0.5.1300; earlier 16.0.5.702)
+Base  = stock Nord 6 OxygenOS 17 images (verified: 17.0.0.100; OxygenOS 16 bases are no longer supported)
 Donor = ColorOS 17 images (OnePlus 15 build; may be replaced by newer builds)
 
 Every step below reproduces a fix that was made and verified on the device by hand
@@ -235,8 +235,7 @@ GOOGLE_MINIMAL = {
         'del-app-pre/GoogleHome', 'del-app-pre/GoogleOne', 'del-app-pre/Videos_del', 'del-app-pre/YTMusic_del',
     ],
 }
-SECCOMP_LSEEK = ['qsap_qapeservice', 'qesdksec', 'syshealthmon']  # SIGSYS loop with A17 libs
-VERIFIED_BASE = 'CPH2793export_11_16.0.5.1300(EX01)_2026101221100203'   # was 16.0.5.702 (2026-04) until 2026-11-01
+VERIFIED_BASE = 'CPH2793export_11_17.0.0.100(EX01)_2026111118150000'   # OxygenOS 17 since 2026-11-18 (was 16.0.5.1300)
 
 
 # ---------------------------------------------------------------- helpers
@@ -454,44 +453,22 @@ def perfboost_drop_l3(s):
     return s, count
 
 
-def do_vendor(v, dprops):
+def do_vendor(v):
     LOG.step('vendor  (base tree)')
     f = v.path('etc/fstab.qcom')
     lines = open(f).read().split('\n')
     new = [re.sub(r',avb(=[\w.]+)?', '', re.sub(r'avb=vbmeta\w*,', '', l)) for l in lines]
     open(f, 'w').write('\n'.join(new))
     LOG('fstab.qcom: avb flags stripped on %d lines (images are not signed)' % sum(a != b for a, b in zip(lines, new)))
-    for name in SECCOMP_LSEEK:
-        f = v.path('etc/seccomp_policy/%s.policy' % name)
-        s = open(f).read()
-        if re.search(r'^lseek\s*:', s, re.M):
-            continue
-        s2 = re.sub(r'^(read: *1\n)', r'\1lseek: 1\n', s, count=1, flags=re.M)
-        if s2 == s:
-            s2 = s.rstrip('\n') + '\nlseek: 1\n'
-        open(f, 'w').write(s2)
-        LOG('seccomp %s: + lseek (service died with SIGSYS every 5 s)' % name)
     f = v.path('etc/perf/perfboostsconfig.xml')
     s, n = perfboost_drop_l3(open(f).read())
     open(f, 'w').write(s)
     LOG('perfboostsconfig.xml: removed [13,32] (0x43480000, L3 memlat min freq) from %d tuna boosts '
         '(targetresourceconfigs marks it unsupported -> "Failed to reset [13,32]" on every scroll)' % n)
-    f = v.path('etc/selinux/vendor_property_contexts')
-    keep, dropped = [], []
-    for line in open(f).read().split('\n'):
-        t = line.split()
-        if t and not line.startswith('#') and t[0] in dprops:
-            dropped.append(t[0])
-            continue
-        keep.append(line)
-    open(f, 'w').write('\n'.join(keep))
-    LOG('vendor_property_contexts: dropped %d entries already defined by donor system parts: %s'
-        % (len(dropped), ' '.join(dropped)))
 
 
-def do_odm(o, donor_odm):
+def do_odm(o):
     LOG.step('odm  (base tree)')
-    o.add_from(donor_odm, 'lib64/libradioapis.so', 'radio API lib matching ColorOS 17 telephony')
     # Widevine L1 Provisioning 4.0 fails in the TEE on this phone (status 323, same TEE key path as the
     # broken KeyMint CSR), so Netflix stops at error 15001 (-93). Provisioning 3.0 (factory keybox) works.
     if not o.exists('build.prop') or 'vendor.wv.oemcrypto.debug.enable_prov40=' not in open(o.path('build.prop')).read():
@@ -565,31 +542,6 @@ def do_system_ext(se, base_se, tools, args):
         LOG('removed stale odex/vdex of %s' % ', '.join(done))
 
 
-# /product/overlay merge. ColorOS init (libfs_mgr) merges the my_* overlay dirs plus the region's
-# my_product/cust/<region>/overlay into /product/overlay. From C.80 on, libfs_mgr builds those lowerdirs
-# from /my_<part>/overlay, because the OnePlus 15 vendor fstab mounts my_* at /my_*. The Nord 6 (base)
-# vendor mounts them at /mnt/vendor/my_*, so every lowerdir is dropped as missing and the mount fails
-# ("at least 2 lowerdir are needed"). Then no my_product/my_stock overlay is installed (the Nord 6
-# display overlay with the centre punch hole, SystemUI/GMS config...), and the Oplus cust partition scan
-# hands zygote /my_product/cust/<region>/overlay/*.apk, a path outside its fd allowlist: zygote aborts
-# with "Not allowlisted" when forking system_server (bootloop). This rc redoes the C.75 mount; the second
-# line stacks the region overlays on top and simply fails if that region has no overlay dir.
-PRODUCT_OVERLAY_RC = 'etc/init/port_product_overlay.rc'
-PRODUCT_OVERLAY_RC_DATA = """# port_kit: /product/overlay merge with the Nord 6 /mnt/vendor/my_* layout (see build_port.py)
-on post-fs
-    mount overlay overlay-overlay /product/overlay ro lowerdir=/mnt/vendor/my_region/overlay:/mnt/vendor/my_preload/overlay:/mnt/vendor/my_product/overlay:/mnt/vendor/my_heytap/overlay:/mnt/vendor/my_stock/overlay:/mnt/vendor/my_engineering/overlay:/product/overlay,userxattr
-    mount overlay overlay-overlay /product/overlay ro lowerdir=/mnt/vendor/my_product/cust/${ro.oplus.pipeline.region}/overlay:/product/overlay,userxattr
-"""
-
-
-def product_overlay_fix(se):
-    """Add PRODUCT_OVERLAY_RC (see above). Harmless if init's own merge works: identical layers on top."""
-    like = 'etc/init/' + sorted(f for f in os.listdir(se.path('etc/init')) if f.endswith('.rc'))[0]
-    se.add_new(PRODUCT_OVERLAY_RC, PRODUCT_OVERLAY_RC_DATA, like)
-    LOG('system_ext/%s added: /product/overlay merged from /mnt/vendor/my_* + cust/<region> (donor libfs_mgr '
-        'expects /my_*; without it no my_* overlay loads and zygote aborts on cust overlays)' % PRODUCT_OVERLAY_RC)
-
-
 LAUNCHER_APK = os.path.join(KIT, 'assets', 'launcher', 'OplusLauncher.apk')
 LAUNCHER_MD5 = 'b0dabd90747c7da2060d5bb58498e67b'
 
@@ -619,18 +571,8 @@ MY_STOCK_PROPS_DELETE = [
 ]
 
 
-def do_my_stock(ms, base_ms, keep_going):
+def do_my_stock(ms, keep_going):
     LOG.step('my_stock  (donor tree)')
-    n = 0
-    for sub in ('media/audio/ringtones', 'media/audio/notifications'):
-        if not os.path.isdir(base_ms.path(sub)):
-            continue
-        for f in sorted(os.listdir(base_ms.path(sub))):
-            rel = sub + '/' + f
-            if not ms.exists(rel):
-                ms.add_from(base_ms, rel)
-                n += 1
-    LOG('added %d OnePlus ringtones/notification sounds from base' % n)
     have = [k for k in MY_STOCK_PROPS_DELETE if k in read_props(ms.path('build.prop'))]
     if have:
         edit_props(ms.path('build.prop'), delete=set(have))
@@ -661,6 +603,26 @@ def xml_edit(path, fn, what):
         LOG('(no change) ' + what)
 
 
+# Ringtones / notification sounds. OxygenOS 17 (base) ships them as plain my_product/res/audio/{ringtones,
+# notifications}. The donor (OnePlus 15) ships them only as res/audio/haptic_ringtone/output<F>HZ/..., one set
+# per vibration-motor resonance picked from its ro.oplus.haptic.* props. Those props are removed (Nord 6 motor
+# differs), so no set matched and the sound pickers were empty. Nord 6 = base sounds, no haptic sets.
+BASE_SOUND_DIRS = ['res/audio/ringtones', 'res/audio/notifications']
+DONOR_SOUND_REMOVE = ['res/audio/haptic_ringtone']
+
+
+def sound_parity(mp, base_mp):
+    for rel in DONOR_SOUND_REMOVE:
+        mp.remove(rel, 'OnePlus 15 per-motor haptic ringtone sets; the Nord 6 motor has none')
+    n = 0
+    for rel in BASE_SOUND_DIRS:
+        mp.add_from(base_mp, rel)
+        n += len(os.listdir(mp.path(rel)))
+    if not n:
+        raise RuntimeError('base my_product has no ringtones/notification sounds in res/audio')
+    LOG('ringtones/notification sounds = base my_product/res/audio (%d files)' % n)
+
+
 def do_my_product(mp, base_mp, donor_prj):
     LOG.step('my_product  (donor tree)')
     for rel in DONOR_MY_PRODUCT_REMOVE:
@@ -673,6 +635,7 @@ def do_my_product(mp, base_mp, donor_prj):
     for rel in HOTWORD_APKS:
         mp.add_from(base_mp, rel)
     LOG('hotword enrollment apks = base (donor DSP model crashed the ADSP: charging/Android Auto loop)')
+    sound_parity(mp, base_mp)
     for ov in PROJECT_OVERLAYS:
         for f in glob.glob(mp.path('overlay/%s.*.apk' % ov)):
             mp.remove(os.path.relpath(f, mp.root), 'donor project overlay')
@@ -1137,32 +1100,20 @@ def main():
 
     # reference files from the other side
     base_mp = ref_part(tools, img('base', 'my_product'), W('ref_base'), 'my_product',
-                       BASE_MY_PRODUCT_FILES + HOTWORD_APKS + ['overlay', 'vendor/etc', 'build.prop', 'etc', 'cust'], 'base')
-    base_ms = ref_part(tools, img('base', 'my_stock'), W('ref_base'), 'my_stock',
-                       ['media/audio/ringtones', 'media/audio/notifications'], 'base')
+                       BASE_MY_PRODUCT_FILES + HOTWORD_APKS + BASE_SOUND_DIRS
+                       + ['overlay', 'vendor/etc', 'build.prop', 'etc', 'cust'], 'base')
     base_se = ref_part(tools, img('base', 'system_ext'), W('ref_base'), 'system_ext',
                        ['etc/display_brightness_config_common.xml', 'framework/vendor-subsystem-service.jar'], 'base')
-    donor_odm = ref_part(tools, img('donor', 'odm'), W('ref_donor'), 'odm', ['lib64/libradioapis.so'], 'donor')
-    ref_part(tools, img('donor', 'product'), W('ref_donor'), 'product', ['etc/selinux'], 'donor')
-    dprops = set()
-    for f in glob.glob(W('src', 'system', 'system', 'etc', 'selinux', '*property_contexts')) \
-            + glob.glob(W('src', 'system_ext', 'etc', 'selinux', '*property_contexts')) \
-            + glob.glob(W('ref_donor', 'product', 'etc', 'selinux', '*property_contexts')):
-        for line in open(f, errors='replace'):
-            t = line.split()
-            if t and not t[0].startswith('#'):
-                dprops.add(t[0])
     donor_prj = read_props(parts['my_product'].path('build.prop')).get('ro.oplus.image.my_product.type', '')
     base_prj = read_props(base_mp.path('build.prop')).get('ro.oplus.image.my_product.type', '')
     LOG('project ids: donor %s, base %s' % (donor_prj, base_prj))
 
-    do_vendor(parts["vendor"], dprops)
-    do_odm(parts['odm'], donor_odm)
+    do_vendor(parts["vendor"])
+    do_odm(parts['odm'])
     do_system(parts['system'], tools, args.work, args.keep_going)
     do_system_ext(parts['system_ext'], base_se, tools, args)
-    product_overlay_fix(parts['system_ext'])
     do_my_product(parts["my_product"], base_mp, donor_prj)
-    do_my_stock(parts['my_stock'], base_ms, args.keep_going)
+    do_my_stock(parts['my_stock'], args.keep_going)
     do_my_manifest(parts['my_manifest'], W('probe_base', 'my_manifest', 'build.prop'))
 
     LOG.step('building images (erofs lz4hc,%d)' % args.level)

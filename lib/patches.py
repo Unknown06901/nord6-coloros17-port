@@ -117,24 +117,6 @@ def systemui_timeout_aod(dex):
 
 # ------------------------------------------------------------------ oplus-services.jar
 
-def services_engineer_checkservice(dex):
-    """Engineer HAL is not declared on this device: waitForService() would block forever.
-    Use checkService() (returns null immediately) like the working port."""
-    wait = 'Landroid/os/ServiceManager;->waitForService(Ljava/lang/String;)Landroid/os/IBinder;'
-    check = dex.method_index('Landroid/os/ServiceManager;->checkService(Ljava/lang/String;)Landroid/os/IBinder;')
-    if check is None:
-        raise PatchError('checkService method id not present in this dex')
-    hits = []
-    for _, off, units in dex.methods('Lcom/android/server/engineering/OplusEngineerFwService;'):
-        ins = dex.insns_at(off, units)
-        for k, x in enumerate(ins):
-            if x.op == 0x71 and x.ref() == wait and k and ins[k - 1].op in (0x1a, 0x1b) \
-                    and ins[k - 1].ref() == 'vendor.oplus.hardware.engineer.IEngineer/default':
-                hits.append(x)
-    x = find_one(hits, 'OplusEngineerFwService waitForService')
-    dex.d[x.off + 2:x.off + 4] = check.to_bytes(2, 'little')
-
-
 def services_timeout_doze(dex):
     """PowerManagerServiceExtImpl.getOplusDozeAfterOff: timeout sleep must go to DOZE (AOD),
     not OFF -> compare mGotoSleepReasonWithAod with -8 (never true) instead of 2 (timeout)."""
@@ -529,9 +511,6 @@ def patch_systemui(apk, log):
 
 def patch_services_jar(jar, tools, work, log):
     """Binary patches in place, then the smali patch (needs a dex rebuild) on the VRR class."""
-    patch_dex_in_zip(jar, 'Lcom/android/server/engineering/OplusEngineerFwService;',
-                     services_engineer_checkservice, 'engineer checkService')
-    log('oplus-services: engineer HAL lookup no longer blocks (checkService)')
     patch_dex_in_zip(jar, 'Lcom/android/server/power/PowerManagerServiceExtImpl;',
                      services_timeout_doze, 'timeout doze')
     log('oplus-services: screen timeout dozes into AOD')

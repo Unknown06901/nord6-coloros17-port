@@ -349,9 +349,10 @@ fi
 # Same clean-up as the dirty-flash step of flash_all.bat. Only possible when TWRP decrypted /data;
 # all of it is rebuilt by Android on the next boot.
 if [ -f /data/system/packages.xml ]; then
-  ui_print "- Clearing package, carrier and settings-search caches"
+  ui_print "- Clearing package, carrier, settings-search and system-sounds caches"
   run rm -rf /data/system/package_cache/*
   run rm -f /data/user_de/0/com.android.phone/files/carrierconfig-*.xml
+  run rm -f /data/user/0/com.google.android.providers.media.module/databases/internal.db*
   si=/data/data/com.android.settings.intelligence
   [ -d $si ] && run rm -f $si/databases/search_index.db $si/databases/search_index.db-journal $si/databases/search_index.db-wal $si/databases/search_index.db-shm $si/shared_prefs/indexing_manager.xml $si/shared_prefs/full_indexed_pkgs.xml
 fi

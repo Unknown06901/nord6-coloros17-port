@@ -20,7 +20,7 @@ change the build makes; read it before changing a step.
 ## The user's setup
 
 - Kit folder: `~/port/port_kit` on WSL2 (Ubuntu) under Windows. Inputs and outputs sit next to it: `~/port/base/images`
-  (Nord 6 OxygenOS 16), `~/port/donor_c80/images` (OnePlus 15 ColorOS 17 C.80), `~/port/out_*` (build outputs), and a
+  (Nord 6 OxygenOS 17.0.0.100), `~/port/donor_c80/images` (OnePlus 15 ColorOS 17 C.80), `~/port/out_*` (build outputs), and a
   build log `~/port/_<name>_build.log` per build.
 - The kit is a git repo, pushed to the private GitHub repo `Unknown06901/nord6-coloros17-port` (`main`). Commit
   kit changes with a clear message; push when the user asks. Build inputs and outputs are never committed.
@@ -34,6 +34,10 @@ change the build makes; read it before changing a step.
 - **Melody earbud popup work stays out of the kit.** The case-open popup, its blur and the realme Buds Air6 Pro image
   packs live only in the KernelSU module `port_melody_blur` on the user's phone. Don't add them here. The kit's only
   Melody step is the realme whitelist patch (`patch_melody`).
+  The module's `post-fs-data.sh` rebuilds `/product/overlay` from the my_* overlay dirs. With a mount path that
+  doesn't exist the merge loses every my_* overlay and zygote aborts with `Not allowlisted (70): /my_product/cust/...`
+  (bootloop that looks like a port bug). Since 2026-11-18 it uses `/my_*` (OxygenOS 17 base) and falls back to
+  `/mnt/vendor/my_*`; a copy of its scripts is in `~/port/melody_realme_module/port_melody_blur_scripts/`.
 
 ## What this kit is
 
@@ -41,7 +45,7 @@ It builds a ColorOS 17 port ROM for the **OnePlus Nord 6** from two official fir
 
 | | Device | Model / project | SoC | Verified build |
 |---|---|---|---|---|
-| Base | OnePlus Nord 6 (OxygenOS 16) | CPH2793, OP6135L1, project 24885 | SM8735 | `CPH2793export_11_16.0.5.1300(EX01)` |
+| Base | OnePlus Nord 6 (OxygenOS 17) | CPH2793, OP6135L1, project 24885 | SM8735 | `CPH2793export_11_17.0.0.100(EX01)` |
 | Donor | OnePlus 15 (ColorOS 17, Android 17) | CPH2745, OP611FL1, project 24863 | SM8850 | `CPH2745_11.C.75_1750_202610181120` (17.0.0.102 EX01); C.80 (17.0.1.201 EX01) builds cleanly, see note below |
 
 The Nord 6 panel is a **165 Hz LTPS video-mode panel** (`AA610_P_3_A0034_dsc_video_mode_panel`), not LTPO. It
@@ -184,7 +188,22 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   `ro.oplus.radio.global_regionlock.dynamic` (my_stock) and `persist.sys.bt.leacoexist` (my_product). New and
   kept: phoenixd + oplus_kmsg_wb_helper (the base kernel has Phoenix 2.0), gpp client libs (base vendor has the
   hexlp HAL), subsys-imsvoip-plugin (software only, no HAL calls).
-- **C.80 first flash bootlooped (2026-11-11), fixed by `port_product_overlay.rc`:** zygote aborted forking
+- **Upstream to the OxygenOS 17 base (17.0.0.100, 2026-11-18).** The official Android 17 base made four steps
+  obsolete, and they were removed: the `lseek` seccomp additions (the base policies have it), the donor
+  `libradioapis.so` in odm (base odm is ColorOS 17 telephony now), the oplus-services engineer `checkService`
+  patch (the base vendor declares `IEngineer/default` in `vendor.oplus.hardware.engineer.aidl.apex`, and stock
+  OxygenOS 17 uses the same `waitForService`), `port_product_overlay.rc` (the base fstab mounts my_* at
+  `/my_*`, as the donor's libfs_mgr expects), and two steps that had nothing left to do: the vendor_property_contexts
+  duplicate drop (0 duplicates) and the base ringtones copy (OxygenOS 17 my_stock has the same sounds as the donor). Still needed on 17.0.0.100: fstab avb strip, perf [13,32]
+  (still `Supported="no"` for tuna), Widevine prov40 off (base still `true`), dtbo AOD config (base panel nodes
+  still lack it), subsys_radio renumbering (interface hashes still differ), all my_product/my_stock parity
+  steps and every donor-side app patch. Sounds moved in OxygenOS 17: ringtones/notifications are in
+  `my_product/res/audio` (not my_stock), and the donor has only per-motor `haptic_ringtone/output<F>HZ` sets, so
+  `sound_parity` takes the base folders (missing tones after the first 17.0.0.100 flash). Firmware isn't needed: 17.0.0.100 has the same GKI kernel build as 16.0.5.1300,
+  an Android 15 vendor at the same patch level (2026-10-01) and KeyMint v3, so the phone's OxygenOS 16 firmware stays and a
+  dirty flash from the 16.0.5.1300-based port keeps data (no patch-level rollback). 26 of 29 firmware images differ in bytes.
+  Old-base history follows.
+- **C.80 first flash bootlooped (2026-11-11), fixed by `port_product_overlay.rc` (removed with the OxygenOS 17 base):** zygote aborted forking
   system_server with `Not allowlisted (70): /my_product/cust/IN/overlay/...apk`, and once past that the punch
   hole sat on the left. Cause (from the saved boot logs in `/mnt/vendor/oplusreserve/media/log/boot_log/`,
   `kernel_boot.log`, grep `libfs_mgr`): C.80 libfs_mgr mounts `/product/overlay` with lowerdirs `/my_product/overlay`

@@ -250,15 +250,29 @@ if "%ROOT%"=="remove" (
     goto :done
 )
 echo Optional, needs root and USB debugging: clear the cached carrier settings, the package
-echo cache and the Settings search index, so changed carrier configs, apps and settings are
-echo picked up (one extra reboot).
+echo cache, the Settings search index and the system sounds index, so changed carrier configs,
+echo apps, settings and ringtones are picked up (one extra reboot).
 choice /c YN /m "Do this once the phone has booted"
 if errorlevel 2 goto :done
 call :wait_android
-adb shell "su -c 'am force-stop com.android.settings.intelligence; rm -f /data/user_de/0/com.android.phone/files/carrierconfig-*.xml; rm -rf /data/system/package_cache/*; cd /data/data/com.android.settings.intelligence && rm -f databases/search_index.db* shared_prefs/indexing_manager.xml shared_prefs/full_indexed_pkgs.xml'"
+REM Sounds set to None (ringtone/notification/alarm = null): a phone that booted once without the sound files
+REM keeps them empty. MediaProvider sets the stock default only while the *_set flag is missing and it indexes
+REM the file for the first time (internal.db is rebuilt below). None can also be the user's choice, so ask.
+REM settings runs as the shell user: under su it fails silently.
+set "TONES=%LOGDIR%\empty_tones.tmp"
+adb shell "for k in ringtone notification_sound alarm_alert; do case $(settings get system $k) in ''|null) echo $k;; esac; done" > "%TONES%" 2>nul
+for %%A in ("%TONES%") do if %%~zA equ 0 goto :tones_done
+echo These sounds are set to None: 
+type "%TONES%"
+choice /c YN /m "Set them back to the stock default tone (N keeps None)"
+if errorlevel 2 goto :tones_done
+adb shell "for k in ringtone notification_sound alarm_alert; do case $(settings get system $k) in ''|null) settings delete system ${k}_set;; esac; done"
+:tones_done
+if exist "%TONES%" del /q "%TONES%"
+adb shell "su -c 'am force-stop com.android.settings.intelligence; am force-stop com.google.android.providers.media.module; rm -f /data/user/0/com.google.android.providers.media.module/databases/internal.db*; rm -f /data/user_de/0/com.android.phone/files/carrierconfig-*.xml; rm -rf /data/system/package_cache/*; cd /data/data/com.android.settings.intelligence && rm -f databases/search_index.db* shared_prefs/indexing_manager.xml shared_prefs/full_indexed_pkgs.xml'"
 if errorlevel 1 (
     echo Root command failed - grant adb shell root access in your root manager and run it again:
-    echo adb shell "su -c 'am force-stop com.android.settings.intelligence; rm -f /data/user_de/0/com.android.phone/files/carrierconfig-*.xml; rm -rf /data/system/package_cache/*; cd /data/data/com.android.settings.intelligence && rm -f databases/search_index.db* shared_prefs/indexing_manager.xml shared_prefs/full_indexed_pkgs.xml'"
+    echo adb shell "su -c 'am force-stop com.android.settings.intelligence; am force-stop com.google.android.providers.media.module; rm -f /data/user/0/com.google.android.providers.media.module/databases/internal.db*; rm -f /data/user_de/0/com.android.phone/files/carrierconfig-*.xml; rm -rf /data/system/package_cache/*; cd /data/data/com.android.settings.intelligence && rm -f databases/search_index.db* shared_prefs/indexing_manager.xml shared_prefs/full_indexed_pkgs.xml'"
     pause
     exit /b 1
 )

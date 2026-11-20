@@ -199,9 +199,10 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   still lack it), subsys_radio renumbering (interface hashes still differ), all my_product/my_stock parity
   steps and every donor-side app patch. Sounds moved in ColorOS 17: ringtones/notifications are in
   `my_product/res/audio` (not my_stock), and the donor has only per-motor `haptic_ringtone/output<F>HZ` sets, so
-  `sound_parity` takes the base folders (missing tones after the first 17.0.0.100 flash). Firmware isn't needed: 17.0.0.100 has the same GKI kernel build as 16.0.5.1300,
-  an Android 15 vendor at the same patch level (2026-10-01) and KeyMint v3, so the phone's OxygenOS 16 firmware stays and a
-  dirty flash from the 16.0.5.1300-based port keeps data (no patch-level rollback). 26 of 29 firmware images differ in bytes.
+  `sound_parity` takes the base folders (missing tones after the first 17.0.0.100 flash). 17.0.0.100 has the same GKI kernel build as 16.0.5.1300, an Android 15 vendor at the same patch level
+  (2026-10-01) and KeyMint v3, so a dirty flash from the 16.0.5.1300-based port keeps data (no patch-level rollback).
+  **But the phone needs the 17.0.0.100 firmware** (see Hotword): 26 of 29 firmware images differ (dsp, spuservice,
+  oplus_sec are equal), and the OxygenOS 16 ADSP crashes on the 17 voice model. All firmware is ARB 0 on both.
   Old-base history follows.
 - **C.80 first flash bootlooped (2026-11-11), fixed by `port_product_overlay.rc` (removed with the ColorOS 17 base):** zygote aborted forking
   system_server with `Not allowlisted (70): /my_product/cust/IN/overlay/...apk`, and once past that the punch
@@ -211,8 +212,19 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   C.75 used `/mnt/vendor/...` and worked. Check that kernel log line on every new donor.
 - **oplus-services.jar:** builds before C.80 shipped a system.img with an older auto-port jar; from C.80 on the
   port uses the kit's own donor jar + patches. Device check of that jar is pending (first C.80 flash).
-- **Hotword:** the "Hey Google" enrollment apks come from base. The donor's DSP voice model crashes the
-  Nord 6 ADSP, and every crash drops charging and USB (Android Auto keeps reconnecting).
+- **Hotword / Android Auto (2026-11-20, tested on device):** the "Hey Google" enrollment apks come from base.
+  17.0.0.100 base ships v36 apks (53140 B DSP model, version 868740715; byte-identical to the donor's). That model
+  crashes the **OxygenOS 16 ADSP firmware** (`err_qdi.c:1215:EX:audio_process` every 2-5 s once Hey Google is armed;
+  each ADSP restart drops charging and USB, so wired Android Auto keeps reconnecting). With the stock 17.0.0.100
+  firmware on the phone the same model runs clean (desk test + Desktop Head Unit session with Hey Google and AA
+  audio concurrent: 0 crashes). So: stock 17 firmware + base apks. The OxygenOS 16 v35 apks (53092 B, version
+  642444186) also work, but only matter on OxygenOS 16 firmware. Flashing the firmware without a wipe: the bootloader
+  refuses critical partitions (xbl, abl, tz...) unless `flashing unlock_critical` (wipes), so flash those 25 from
+  fastbootd; fastbootd can't open `modem` (recovery has it mounted), so flash `modem` from the bootloader. Verify by
+  reading the partitions back; `splash` always differs in its first 5 bytes (the phone stamps a `DDPH` header).
+  Check on the phone: `dumpsys soundtrigger_middleware` (model ACTIVE + dataSize) and `/dev/kmsg` for
+  `remoteproc-adsp: fatal`. Note: `dmesg` as root is killed by seccomp on this ROM (SIGSYS tombstones); read
+  `/dev/kmsg` or `/sys/fs/pstore/console-ramoops-0` (previous boot) instead.
 - **Radio:** the donor uses subsys_radio HAL V1 numbering and the Nord 6 HAL is V9. `lib/subsysradio.py`
   renumbers the calls; never drop that step. Radio/RF features, SAR and carrier configs all come from base.
 - **Traceur and CrossDeviceServiceBroker are removed.** ColorOS kept a perfetto "health" trace running all

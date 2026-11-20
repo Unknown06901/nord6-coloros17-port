@@ -1,0 +1,4 @@
+# Aider: load the shared agent instructions into every chat (read-only).
+read:
+  - AGENTS.md
+  - README.md

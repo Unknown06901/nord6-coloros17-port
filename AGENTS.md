@@ -2,15 +2,24 @@
 
 This file is for any AI coding agent working on this kit (Gemini CLI, Google Antigravity, Claude Code,
 ChatGPT / Codex, Cursor, GitHub Copilot and others). Keep everything in this one file; the other instruction
-files only point here:
+files only point here (when you add a pointer for a new tool, keep it a pointer and add it to this table and to
+the README's agent section):
 
 | Agent | Reads |
 |---|---|
-| Codex (ChatGPT's coding agent, CLI and cloud), Cursor, Jules, Aider and most others | `AGENTS.md` |
+| Codex (ChatGPT's coding agent, CLI and cloud), Jules, OpenCode, Zed, Factory and most others | `AGENTS.md` |
 | Claude Code | `CLAUDE.md` -> `AGENTS.md` |
 | Gemini CLI | `GEMINI.md` -> `AGENTS.md` |
+| Qwen Code | `QWEN.md` -> `AGENTS.md` |
 | Google Antigravity | `.agent/rules/port-kit.md` (always on) -> `AGENTS.md` |
 | GitHub Copilot | `.github/copilot-instructions.md` -> `AGENTS.md` |
+| Cursor | `AGENTS.md`, plus `.cursor/rules/port-kit.mdc` (always apply) -> `AGENTS.md` |
+| Windsurf | `.windsurf/rules/port-kit.md` (always on) -> `AGENTS.md` |
+| Cline / Roo Code | `.clinerules/port-kit.md` -> `AGENTS.md` |
+| Amazon Q Developer | `.amazonq/rules/port-kit.md` -> `AGENTS.md` |
+| JetBrains Junie | `.junie/guidelines.md` -> `AGENTS.md` |
+| Kiro | `.kiro/steering/port-kit.md` (always included) -> `AGENTS.md` |
+| Aider | `.aider.conf.yml` loads `AGENTS.md` and `README.md` read-only into every chat |
 | A chat without file access (ChatGPT, Gemini or Claude on the web) | Upload `AGENTS.md` and `README.md` (or the kit zip) and say "follow AGENTS.md" |
 
 Agent memory (Claude memory, Gemini memories, ChatGPT memory) is not shared between services. Anything another
@@ -95,6 +104,9 @@ python3 build_port.py --base Nord6_ColorOS17_OTA.zip --donor OnePlus15_ColorOS17
 
 # 3. optional: TWRP-flashable zip of the output
 python3 make_recovery_zip.py out_port Nord6_ColorOS17_Port.zip --firmware-ref BASE_IMAGES_DIR
+
+# 4. firmware fix folder for phones still on OxygenOS 16 firmware (Android Auto / Hey Google fix)
+python3 make_firmware_fix.py BASE_IMAGES_DIR_OR_OTA out_fw_fix
 ```
 
 `--base` and `--donor` take an images folder, a `payload.bin`, a full OTA zip or a fastboot zip.
@@ -112,6 +124,8 @@ lines you can't explain.
 | `lib/misc.py`, `assets/misc/` | Settings > Miscellaneous page (appended dex + top-level row), Developer options animation-scale box (`AnimScale`) and its back ends: services.jar, framework.jar (smali 3, `PortSpoof`), SettingsProvider.apk (`PortDevHide`), app-readable props, Photos sysconfig |
 | `lib/subsysradio.py` | Renumbers the donor's subsys_radio HAL calls to the Nord 6 HAL version |
 | `make_recovery_zip.py`, `assets/recovery/` | TWRP zip builder and its installer script |
+| `make_firmware_fix.py`, `assets/firmware/` | Firmware fix folder: the base build's firmware images + `flash_firmware.bat` (modem from the bootloader, the rest from fastbootd, no wipe, root kept) |
+| `assets/fastboot_driver/` | Windows WinUSB driver for USB `18D1:D00D` (Nord 6 bootloader and fastbootd); `install_driver.ps1` needs an Administrator PowerShell |
 | `assets/flash_all.bat`, `assets/ksu_root.ps1` | Windows flasher (clean/dirty flash, log collection) and the KernelSU Next init_boot patcher |
 | `assets/twrp_nord6.img.gz` | Nord 6 TWRP, gzipped (the build writes `twrp_nord6.img` to the output); `flash_all.bat` flashes the port from its FastbootD |
 | `assets/odm/` | Display colour calibration for the Nord 6 panel |
@@ -222,6 +236,17 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   refuses critical partitions (xbl, abl, tz...) unless `flashing unlock_critical` (wipes), so flash those 25 from
   fastbootd; fastbootd can't open `modem` (recovery has it mounted), so flash `modem` from the bootloader. Verify by
   reading the partitions back; `splash` always differs in its first 5 bytes (the phone stamps a `DDPH` header).
+  `make_firmware_fix.py` builds that package from the base images (25 images by default: dsp, spuservice,
+  oplus_sec and splash are the same as OxygenOS 16.0.5.1300; `--skip-same-as DIR` drops more). The images are
+  never committed (modem.img is 199 MB, over GitHub's 100 MB limit; base inputs stay out of git anyway).
+  `flash_firmware.bat` was written from the steps run by hand on 2026-11-20; the script itself has not yet run
+  end to end on a phone.
+- **Windows fastboot driver:** the Nord 6 bootloader (REV_0100) and fastbootd (REV_0606) both enumerate as USB
+  `18D1:D00D`, which Google's `android_winusb.inf` doesn't list, so Device Manager shows "CPH2793" with an error
+  and a manually picked driver is lost on every mode switch. `assets/fastboot_driver` adds a WinUSB inf with the
+  Android interface GUID `{F72FE0D4-CBCB-407d-8814-9ED673D0DD6B}` and a self-signed catalog; installed on the
+  user's PC on 2026-11-20 (published as `oem48.inf`). An agent may be blocked from running the elevated install
+  (it adds a certificate to the trusted root store); the user runs it.
   Check on the phone: `dumpsys soundtrigger_middleware` (model ACTIVE + dataSize) and `/dev/kmsg` for
   `remoteproc-adsp: fatal`. Note: `dmesg` as root is killed by seccomp on this ROM (SIGSYS tombstones); read
   `/dev/kmsg` or `/sys/fs/pstore/console-ramoops-0` (previous boot) instead.

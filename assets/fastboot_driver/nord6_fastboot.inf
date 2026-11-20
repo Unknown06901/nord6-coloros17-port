@@ -1,0 +1,46 @@
+; Nord 6 / OnePlus fastboot (bootloader + fastbootd both enumerate as 18D1:D00D, which
+; Google's android_winusb.inf does not list). WinUSB + the Android USB interface GUID used by fastboot.exe.
+[Version]
+Signature   = "$Windows NT$"
+Class       = AndroidUsbDeviceClass
+ClassGuid   = {3F966BD9-FA04-4ec5-991C-D326973B5128}
+Provider    = %ProviderName%
+DriverVer   = 11/20/2026,1.0.0.0
+CatalogFile = nord6_fastboot.cat
+PnpLockdown = 1
+
+[ClassInstall32]
+AddReg = ClassInstall_AddReg
+
+[ClassInstall_AddReg]
+HKR,,,,%ClassName%
+HKR,,NoInstallClass,,1
+HKR,,Icon,,-1
+
+[Manufacturer]
+%ProviderName% = Devices, NTamd64, NTarm64
+
+[Devices.NTamd64]
+%BootloaderName% = USB_Install, USB\VID_18D1&PID_D00D
+
+[Devices.NTarm64]
+%BootloaderName% = USB_Install, USB\VID_18D1&PID_D00D
+
+[USB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[USB_Install.Services]
+Include = winusb.inf
+Needs   = WINUSB.NT.Services
+
+[USB_Install.HW]
+AddReg = Dev_AddReg
+
+[Dev_AddReg]
+HKR,,DeviceInterfaceGUIDs,0x10000,"{F72FE0D4-CBCB-407d-8814-9ED673D0DD6B}"
+
+[Strings]
+ProviderName   = "Nord6 port kit"
+BootloaderName = "Android Bootloader Interface"
+ClassName      = "Android Device"

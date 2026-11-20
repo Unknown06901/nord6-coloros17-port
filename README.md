@@ -82,6 +82,28 @@ verified: the ramdisk cpio is byte-identical to the one ksud produces), and step
 internet it reuses an earlier download. After boot it offers to install the manager over adb; otherwise
 install `ksu\KernelSU_Next.apk` by hand.
 
+### Firmware fix (Android Auto / "Hey Google")
+
+```bash
+python3 make_firmware_fix.py BASE out_fw_fix      # BASE = base images folder, payload.bin or OTA zip
+```
+
+The port needs the phone on the base build's firmware (ColorOS 17.0.0.100). With OxygenOS 16 firmware the base's
+"Hey Google" DSP model crashes the ADSP whenever Hey Google is armed; each crash drops charging and USB, so wired
+Android Auto keeps reconnecting. This writes `out_fw_fix/` with the base firmware images (25 by default; the
+four that are identical on OxygenOS 16.0.5.1300 are left out, `--all` keeps them, `--skip-same-as DIR` also drops
+images identical to the firmware in DIR), `md5.txt`, `flash_firmware.bat`, `README.txt` and `fastboot_driver/`.
+`flash_firmware.bat` (Windows, phone in Android with USB debugging or in the bootloader) flashes `modem` from the
+bootloader, switches to fastbootd and flashes the rest to the current slot, then reboots: no wipe, no erase, no
+`unlock_critical`, and boot/init_boot/vendor_boot are never written, so root stays. The bootloader refuses the
+critical partitions (xbl, abl, tz, ...) without a wipe, and fastbootd can't open `modem`, hence the split. Both
+firmware sets are anti-rollback 0. After it, retrain Voice Match. The port images don't need reflashing.
+
+`fastboot_driver/` is a one-time Windows fix: the Nord 6 bootloader and fastbootd both show up as USB `18D1:D00D`,
+which Google's USB driver doesn't list, so Device Manager shows "CPH2793" with an error after every mode switch.
+Run `install_driver.ps1` in an Administrator PowerShell; it installs a WinUSB driver for that ID with a
+self-signed certificate, and both modes bind automatically from then on.
+
 ### Recovery zip (no PC needed)
 
 ```bash
@@ -251,9 +273,12 @@ Stock or other recoveries' FastbootD are no longer used for flashing. TWRP stays
 ## Working on the kit with an AI agent
 
 All agent instructions are in `AGENTS.md`: ground rules, the user's setup, commands, layout and every decision
-already tested on the phone. `CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI), `.agent/rules/port-kit.md`
-(Google Antigravity) and `.github/copilot-instructions.md` (GitHub Copilot) only point to it; Codex (ChatGPT's coding
-agent), Cursor and others read `AGENTS.md` directly. Open the `port_kit` folder as the workspace.
+already tested on the phone. Pointer files for tools that don't read `AGENTS.md` on their own only point to it:
+`CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI), `QWEN.md` (Qwen Code), `.agent/rules/port-kit.md` (Google
+Antigravity), `.github/copilot-instructions.md` (GitHub Copilot), `.cursor/rules/port-kit.mdc` (Cursor),
+`.windsurf/rules/port-kit.md` (Windsurf), `.clinerules/port-kit.md` (Cline / Roo Code), `.amazonq/rules/port-kit.md`
+(Amazon Q Developer), `.junie/guidelines.md` (JetBrains Junie), `.kiro/steering/port-kit.md` (Kiro) and
+`.aider.conf.yml` (Aider). Codex (ChatGPT's coding agent), Jules, OpenCode and others read `AGENTS.md` directly. Open the `port_kit` folder as the workspace.
 
 In a chat with no file access (ChatGPT, Gemini or Claude on the web), upload `AGENTS.md` and `README.md` (or the
 kit zip) and start with: "Read AGENTS.md and README.md first and follow AGENTS.md. Every fix must become a build

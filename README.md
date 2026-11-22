@@ -36,8 +36,9 @@ Other options:
 - `--keep-going`: report a failing patch instead of stopping the build.
 - `--check`: only check Python, Java, the bundled tools, the inputs and free space, then exit (0 = ready).
 
-The output is all images, `firmware/` (the base build's 25 firmware images + `md5.txt`), `flash_all.bat`,
-`ksu_root.ps1` and `BUILD_REPORT.txt`. The report lists every step, the donor fingerprint and the total size of
+The output is all images, `firmware/` (the base build's 25 firmware images + `md5.txt`), `fastboot_driver/`
+(the Windows USB driver fix described under "Firmware fix"), `flash_all.bat`, `ksu_root.ps1` and
+`BUILD_REPORT.txt`. The report lists every step, the donor fingerprint and the total size of
 the logical partitions. Flash from Windows with `flash_all.bat`, which asks for the mode first. Both flash modes
 also flash `firmware/` to the current slot when the folder is there (no wipe; see "Firmware fix" below for why
 Android Auto and "Hey Google" need it): `modem` from the bootloader right after TWRP, the other 24 from TWRP

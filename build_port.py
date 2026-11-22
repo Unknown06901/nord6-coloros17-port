@@ -1175,6 +1175,10 @@ def main():
     for f in ('flash_all.bat', 'ksu_root.ps1'):
         shutil.copy2(os.path.join(KIT, 'assets', f), args.out)
     add_firmware(img, args.out)
+    # fastboot_driver/: the Nord 6 bootloader and fastbootd are USB 18D1:D00D, which Google's USB driver doesn't list
+    # (Device Manager: "CPH2793" with an error). install_driver.ps1 (Administrator) installs a WinUSB driver for it.
+    shutil.copytree(os.path.join(KIT, 'assets', 'fastboot_driver'), os.path.join(args.out, 'fastboot_driver'),
+                    dirs_exist_ok=True)
     # twrp_nord6.img: flash_all.bat installs it from the bootloader and flashes the port from its FastbootD. The kit
     # keeps it gzipped (the raw image is 100 MiB, GitHub's per-file limit).
     with gzip.open(os.path.join(KIT, 'assets', 'twrp_nord6.img.gz'), 'rb') as src, \

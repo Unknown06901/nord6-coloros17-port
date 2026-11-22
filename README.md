@@ -281,15 +281,16 @@ Stock or other recoveries' FastbootD are no longer used for flashing. TWRP stays
 
 ## Working on the kit with an AI agent
 
-All agent instructions are in `AGENTS.md`: ground rules, the user's setup, commands, layout and every decision
-already tested on the phone. Pointer files for tools that don't read `AGENTS.md` on their own only point to it:
-`CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI), `QWEN.md` (Qwen Code), `.agent/rules/port-kit.md` (Google
-Antigravity), `.github/copilot-instructions.md` (GitHub Copilot), `.cursor/rules/port-kit.mdc` (Cursor),
+All agent instructions are in `AGENTS.md` (ground rules, the user's setup, commands, layout) and `DECISIONS.md`
+(every decision and dead end already tested on the phone; separate so `AGENTS.md` stays under Antigravity's
+24,000-byte rule-file limit). Pointer files for tools that don't read `AGENTS.md` on their own only point to it:
+`CLAUDE.md` (Claude Code), `GEMINI.md` (Gemini CLI), `QWEN.md` (Qwen Code), `.agents/rules/port-kit.md` and `.agents/rules/decisions.md` (Google
+Antigravity, which also reads `AGENTS.md` and `GEMINI.md` itself), `.github/copilot-instructions.md` (GitHub Copilot), `.cursor/rules/port-kit.mdc` (Cursor),
 `.windsurf/rules/port-kit.md` (Windsurf), `.clinerules/port-kit.md` (Cline / Roo Code), `.amazonq/rules/port-kit.md`
 (Amazon Q Developer), `.junie/guidelines.md` (JetBrains Junie), `.kiro/steering/port-kit.md` (Kiro) and
 `.aider.conf.yml` (Aider). Codex (ChatGPT's coding agent), Jules, OpenCode and others read `AGENTS.md` directly. Open the `port_kit` folder as the workspace.
 
-In a chat with no file access (ChatGPT, Gemini or Claude on the web), upload `AGENTS.md` and `README.md` (or the
-kit zip) and start with: "Read AGENTS.md and README.md first and follow AGENTS.md. Every fix must become a build
+In a chat with no file access (ChatGPT, Gemini or Claude on the web), upload `AGENTS.md`, `DECISIONS.md` and `README.md` (or the
+kit zip) and start with: "Read AGENTS.md, DECISIONS.md and README.md first and follow AGENTS.md. Every fix must become a build
 step in the kit." Whatever an agent learns that the next one needs goes into `AGENTS.md`, not into that service's
 memory.

@@ -4,4 +4,4 @@ trigger: always_on
 
 # OnePlus Nord 6 ColorOS 17 port kit
 
-All instructions for AI agents are in `AGENTS.md` in the repository root. Read it before doing anything in this kit and follow it: ground rules (never flash, wipe or reboot the phone to bootloader/recovery without the user asking for that exact action; never store the PIN; every fix must become a build step; Melody popup work stays out of the kit), the user's setup (adb path, phone serial), commands, layout and the decisions already verified on the device.
+All instructions for AI agents are in `AGENTS.md` in the repository root. Read it before doing anything in this kit and follow it: ground rules (never flash, wipe or reboot the phone to bootloader/recovery without the user asking for that exact action; never store the PIN; every fix must become a build step; Melody popup work stays out of the kit), the user's setup (adb path, phone serial), commands and layout. The decisions already verified on the device (and the dead ends) are in `DECISIONS.md` in the repository root: read it before changing a build step or patch.

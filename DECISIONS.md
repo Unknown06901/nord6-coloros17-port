@@ -160,6 +160,12 @@ decisions here; if this file nears 24 KB, split it by topic and list the new fil
     `MenuInflater` skip `app:actionViewClass`. `Preference.setIcon` inside `onBindViewHolder` throws (RecyclerView
     rebind during layout), so lazy icons go straight into the row's `android:id/icon` ImageView. Settings' own logs
     hit ColorOS's per-process log quota (`LOG_FLOWCTRL ... DROPPED`); use `dumpsys activity top` for view trees.
+    Typing in the search closed the keyboard after one letter (first 17.0.0.100 build): this list adapter has no stable
+    ids, so each `setVisible` ran `notifyDataSetChanged()` and RecyclerView recycled every row, the focused search
+    row too (trace caught with an `OnFocusChangeListener` writing to a Global setting). Fix: a
+    `SimplePreferenceComparisonCallback` (adapter diffs instead), `PortSearchPref` (skips LayoutPreference's
+    `removeAllViews` re-add) and no item animator; `run()` then rebinds rows 1..n so COUI card corners follow the new
+    first/last row. A pinned header (`setPinnedHeaderView`) is not an option: it sits under the floating toolbar.
   - The Photos features are a switch because the app-side `ApplicationPackageManager.hasSystemFeature` filters them;
     the sysconfig itself is fixed at boot.
   - Testing on the phone: KernelSU Next 3.x mounts a module's `system/` only with a metamodule (none installed), so

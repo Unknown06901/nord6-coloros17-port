@@ -6,10 +6,11 @@
 .implements Landroidx/preference/Preference$OnPreferenceChangeListener;
 .implements Landroid/view/View$OnClickListener;
 .implements Landroid/text/TextWatcher;
+.implements Ljava/lang/Runnable;
 
 # Settings > Miscellaneous > Choose apps (hide developer options). One switch per user-installed app; the ticked
 # packages go to Global port_hide_dev_pkgs (comma-separated), which the patched SettingsProvider reads.
-# Search: a COUISearchBar pill (as on the Settings home page) is the first row; a tap switches it to editing,
+# Search: a COUISearchBar pill (as on the Settings home page) is the first row (PortSearchPref); a tap switches it to editing,
 # Cancel or Back (PortSearchBack) clears it. It matches label or package. The overflow menu has "Show system apps" /
 # "Hide system apps" (the ColorOS popup draws no checkmarks, so the title says what a tap does). Labels are loaded once per fill and sorted through
 # a TreeMap; icons load when a row is first shown (AppPref).
@@ -371,6 +372,48 @@
     goto :goto_loop
 
     :cond_end
+    invoke-virtual {p0}, Landroidx/preference/PreferenceFragmentCompat;->getListView()Landroidx/recyclerview/widget/RecyclerView;
+
+    move-result-object v0
+
+    if-eqz v0, :cond_nolist
+
+    invoke-virtual {v0, p0}, Landroid/view/View;->post(Ljava/lang/Runnable;)Z
+
+    :cond_nolist
+    return-void
+.end method
+
+# Posted by filter(), so it runs after the adapter's own (posted) diff: rebinds every row below the search bar so the
+# COUI card corners follow the new first/last rows. The search row (position 0) is left alone, it holds the focus.
+.method public run()V
+    .registers 4
+
+    invoke-virtual {p0}, Landroidx/preference/PreferenceFragmentCompat;->getListView()Landroidx/recyclerview/widget/RecyclerView;
+
+    move-result-object v0
+
+    if-eqz v0, :cond_end
+
+    invoke-virtual {v0}, Landroidx/recyclerview/widget/RecyclerView;->getAdapter()Landroidx/recyclerview/widget/RecyclerView$Adapter;
+
+    move-result-object v0
+
+    if-eqz v0, :cond_end
+
+    invoke-virtual {v0}, Landroidx/recyclerview/widget/RecyclerView$Adapter;->getItemCount()I
+
+    move-result v1
+
+    add-int/lit8 v1, v1, -0x1
+
+    if-lez v1, :cond_end
+
+    const/4 v2, 0x1
+
+    invoke-virtual {v0, v2, v1}, Landroidx/recyclerview/widget/RecyclerView$Adapter;->notifyItemRangeChanged(II)V
+
+    :cond_end
     return-void
 .end method
 
@@ -414,6 +457,15 @@
     invoke-virtual {p0}, Landroidx/preference/PreferenceFragmentCompat;->getPreferenceManager()Landroidx/preference/PreferenceManager;
 
     move-result-object v1
+
+    # The list adapter has no stable ids here, so without a comparison callback every search letter ran
+    # notifyDataSetChanged() and RecyclerView recycled every row, the focused search bar too (keyboard closed after
+    # one letter). With it the adapter diffs, and only the rows that appear or disappear change.
+    new-instance v2, Landroidx/preference/PreferenceManager$SimplePreferenceComparisonCallback;
+
+    invoke-direct {v2}, Landroidx/preference/PreferenceManager$SimplePreferenceComparisonCallback;-><init>()V
+
+    invoke-virtual {v1, v2}, Landroidx/preference/PreferenceManager;->setPreferenceComparisonCallback(Landroidx/preference/PreferenceManager$PreferenceComparisonCallback;)V
 
     invoke-virtual {v1, v0}, Landroidx/preference/PreferenceManager;->createPreferenceScreen(Landroid/content/Context;)Landroidx/preference/PreferenceScreen;
 
@@ -499,9 +551,9 @@
     invoke-virtual {v1, p0}, Landroid/view/View;->setOnClickListener(Landroid/view/View$OnClickListener;)V
 
     :cond_nobtn
-    new-instance v1, Lcom/android/settingslib/widget/LayoutPreference;
+    new-instance v1, Lcom/android/settings/portmisc/PortSearchPref;
 
-    invoke-direct {v1, p1, v0}, Lcom/android/settingslib/widget/LayoutPreference;-><init>(Landroid/content/Context;Landroid/view/View;)V
+    invoke-direct {v1, p1, v0}, Lcom/android/settings/portmisc/PortSearchPref;-><init>(Landroid/content/Context;Landroid/view/View;)V
 
     const-string v2, "port_search"
 
@@ -530,6 +582,28 @@
     move-result-object v1
 
     invoke-virtual {v1, p0, v2}, Landroidx/activity/OnBackPressedDispatcher;->addCallback(Landroidx/lifecycle/LifecycleOwner;Landroidx/activity/OnBackPressedCallback;)V
+
+    :cond_end
+    return-void
+.end method
+
+# Typing shows/hides rows on every letter. RecyclerView keeps focus in a row that stays attached, but the default
+# item animator binds a changed row into a new ViewHolder, which moved the bar out and closed the keyboard after
+# one letter. No item animator (and PortSearchPref, which skips LayoutPreference's re-add) keeps the bar in place.
+.method public onViewCreated(Landroid/view/View;Landroid/os/Bundle;)V
+    .registers 5
+
+    invoke-super {p0, p1, p2}, Lcom/android/settings/SettingsPreferenceFragment;->onViewCreated(Landroid/view/View;Landroid/os/Bundle;)V
+
+    invoke-virtual {p0}, Landroidx/preference/PreferenceFragmentCompat;->getListView()Landroidx/recyclerview/widget/RecyclerView;
+
+    move-result-object v0
+
+    if-eqz v0, :cond_end
+
+    const/4 v1, 0x0
+
+    invoke-virtual {v0, v1}, Landroidx/recyclerview/widget/RecyclerView;->setItemAnimator(Landroidx/recyclerview/widget/RecyclerView$ItemAnimator;)V
 
     :cond_end
     return-void

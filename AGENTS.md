@@ -46,7 +46,8 @@ change the build makes; read it before changing a step.
   The module's `post-fs-data.sh` rebuilds `/product/overlay` from the my_* overlay dirs. With a mount path that
   doesn't exist the merge loses every my_* overlay and zygote aborts with `Not allowlisted (70): /my_product/cust/...`
   (bootloop that looks like a port bug). Since 2026-11-18 it uses `/my_*` (ColorOS 17 base) and falls back to
-  `/mnt/vendor/my_*`; a copy of its scripts is in `~/port/melody_realme_module/port_melody_blur_scripts/`.
+  `/mnt/vendor/my_*`. The only copy of its scripts is on the phone (`/data/adb/modules/port_melody_blur/`); the PC
+  copy was deleted on 2026-11-22.
 
 ## What this kit is
 
@@ -306,7 +307,7 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   to turn off Banner for Google Play services > "Devices with your account".
 - **UNKNWN AddOns was built and then removed on 2026-11-09 at the user's request** (a Settings > UNKNWN AddOns page
   for CPU/GPU profiles, Overkill thermal table, forced refresh rate, big cores, animation speed, custom font and
-  secure screenshots, plus a root backend). The code is in `../unknwn_addons_backup.zip` (with HOW-TO-RESTORE.txt).
+  secure screenshots, plus a root backend). Its backup zip was deleted on 2026-11-22; it is gone.
   Don't add it back unless the user asks. What it taught, still true for this ROM:
   - `settings` (`cmd`) hands its stdin/stdout/stderr to system_server; pointed at a root-owned file the call fails
     silently ("Failed transaction"). Pipe it in background scripts.

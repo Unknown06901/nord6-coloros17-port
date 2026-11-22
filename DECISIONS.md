@@ -54,7 +54,9 @@ decisions here; if this file nears 24 KB, split it by topic and list the new fil
   end to end on a phone.
   Since 2026-11-22 the port build also writes `firmware/` (same 25 images, `build_port.add_firmware`) and
   `flash_all.bat` flashes it in both modes: `modem` from the bootloader right after TWRP, the other 24 from TWRP
-  FastbootD after the boot images. Not yet run end to end on a phone either.
+  FastbootD after the boot images. Verified 2026-11-22: a flash_all.bat flash of the rebuilt port left
+  modem, abl, tz, bluetooth and aop matching the build's `firmware/md5.txt`; a Desktop Head Unit session ran with the
+  Hey Google model ACTIVE (53140 B, a recognition fired) and 0 ADSP crashes, and the user confirmed Android Auto works.
 - **Windows fastboot driver:** the Nord 6 bootloader (REV_0100) and fastbootd (REV_0606) both enumerate as USB
   `18D1:D00D`, which Google's `android_winusb.inf` doesn't list, so Device Manager shows "CPH2793" with an error
   and a manually picked driver is lost on every mode switch. `assets/fastboot_driver` adds a WinUSB inf with the

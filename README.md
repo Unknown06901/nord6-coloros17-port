@@ -217,8 +217,11 @@ Settings > Miscellaneous (`lib/misc.py`, page code in `assets/misc/smali`, its o
 - Allow app downgrades: sets `persist.sys.port.allow_downgrade`; `PackageManagerServiceUtils.isDowngradePermitted`
   returns true while it is 1 (no `-d` or debuggable build needed).
 - Hide developer options from apps + Choose apps: Global `port_hide_dev` (switch) and `port_hide_dev_pkgs`
-  (comma-separated packages, picked on the Choose apps page, which lists user-installed apps). SettingsProvider.apk
-  (system_ext): `packageValueForCallResult`, which builds every settings read reply, first calls an injected
+  (comma-separated packages, picked on the Choose apps page). Choose apps (`AppsFragment`, `AppPref`,
+  `PortSearchBack`) lists user-installed apps sorted by name; the ⋮ menu has "Show system apps" / "Hide system apps",
+  and a search bar (the same `COUISearchBar` pill as the Settings home page) filters by app name or package. Labels
+  are loaded once and icons only when a row scrolls into view, so the page opens quickly and the ~450 system apps
+  list in about a second. SettingsProvider.apk (system_ext): `packageValueForCallResult`, which builds every settings read reply, first calls an injected
   `portDevHidden(name)`. For `development_settings_enabled`, `adb_enabled` and `adb_wifi_enabled` it reads both
   settings with the caller identity cleared and, if the switch is on and the calling app uid (appId >= 10000) has a
   picked package, answers "0" (`PortDevHide`, `assets/misc/settingsprovider`). The real values and every other

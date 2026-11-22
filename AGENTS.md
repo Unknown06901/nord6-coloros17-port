@@ -339,6 +339,13 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
     `oplus.SettingsFilter.valueFilter` already answers 0 to some apps (Airtel, Xstream) with the switch off; that
     isn't this patch. To test as an app uid without the app, take the provider binder as root
     (`getContentProviderExternal`), then `Os.setuid(uid)` and call `GET_global` (`su <uid> content call` is denied).
+  - Choose apps page (2026-11-22): Back must go through `OnBackPressedDispatcher` (an `OnBackPressedCallback`);
+    `OplusSubSettings.setSubSettingsCallback` / `Activity.onBackPressed` overrides are not called on Android 17.
+    `COUISearchBar.setOnClickListener` attaches to its inner background view, a `COUISearchBar` created in code needs
+    an explicit height (52dp, as on Settings home) or it measures 0, and menus inflated with the fragment's
+    `MenuInflater` skip `app:actionViewClass`. `Preference.setIcon` inside `onBindViewHolder` throws (RecyclerView
+    rebind during layout), so lazy icons go straight into the row's `android:id/icon` ImageView. Settings' own logs
+    hit ColorOS's per-process log quota (`LOG_FLOWCTRL ... DROPPED`); use `dumpsys activity top` for view trees.
   - The Photos features are a switch because the app-side `ApplicationPackageManager.hasSystemFeature` filters them;
     the sysconfig itself is fixed at boot.
   - Testing on the phone: KernelSU Next 3.x mounts a module's `system/` only with a metamodule (none installed), so

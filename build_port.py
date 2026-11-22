@@ -1018,6 +1018,30 @@ def preflight(args):
     return 0 if ok else 1
 
 
+def add_firmware(img, out):
+    """firmware/: the base build's firmware images, flashed by flash_all.bat on every flash (modem from the
+    bootloader, the rest from TWRP FastbootD). The port's "Hey Google" DSP model (base ColorOS 17.0.0.100) crashes
+    the OxygenOS 16 ADSP firmware; every crash drops charging and USB, so wired Android Auto keeps reconnecting.
+    Same image set as make_firmware_fix.py (the 4 images identical on OxygenOS 16.0.5.1300 are left out)."""
+    import make_firmware_fix as mff
+    names = [n for n in mff.FIRMWARE if n not in mff.SAME_ON_16]
+    missing = [n for n in names if not os.path.exists(img('base', n))]
+    if missing:
+        LOG('WARNING: base has no %s - firmware/ not written, Android Auto needs the ColorOS 17 firmware flashed '
+            'separately' % ', '.join(n + '.img' for n in missing))
+        return
+    d = os.path.join(out, 'firmware')
+    os.makedirs(d, exist_ok=True)
+    sums = []
+    for n in names:
+        shutil.copy2(img('base', n), d)
+        sums.append('%s  %s.img' % (mff.md5(os.path.join(d, n + '.img')), n))
+    open(os.path.join(d, 'md5.txt'), 'w', newline='\r\n').write('\n'.join(sums) + '\n')
+    LOG('firmware: %d base images -> firmware/ (%.0f MB); flash_all.bat flashes them (Android Auto / Hey Google '
+        'ADSP fix): modem from the bootloader, the rest from TWRP FastbootD'
+        % (len(names), sum(os.path.getsize(os.path.join(d, n + '.img')) for n in names) / 2**20))
+
+
 def main():
     if sys.version_info < (3, 8):
         sys.exit('python 3.8 or newer is needed')
@@ -1150,6 +1174,7 @@ def main():
 
     for f in ('flash_all.bat', 'ksu_root.ps1'):
         shutil.copy2(os.path.join(KIT, 'assets', f), args.out)
+    add_firmware(img, args.out)
     # twrp_nord6.img: flash_all.bat installs it from the bootloader and flashes the port from its FastbootD. The kit
     # keeps it gzipped (the raw image is 100 MiB, GitHub's per-file limit).
     with gzip.open(os.path.join(KIT, 'assets', 'twrp_nord6.img.gz'), 'rb') as src, \

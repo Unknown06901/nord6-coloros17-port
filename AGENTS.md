@@ -241,6 +241,9 @@ The phone runs this port, rooted with KernelSU Next (`su` works in `adb shell`).
   never committed (modem.img is 199 MB, over GitHub's 100 MB limit; base inputs stay out of git anyway).
   `flash_firmware.bat` was written from the steps run by hand on 2026-11-20; the script itself has not yet run
   end to end on a phone.
+  Since 2026-11-22 the port build also writes `firmware/` (same 25 images, `build_port.add_firmware`) and
+  `flash_all.bat` flashes it in both modes: `modem` from the bootloader right after TWRP, the other 24 from TWRP
+  FastbootD after the boot images. Not yet run end to end on a phone either.
 - **Windows fastboot driver:** the Nord 6 bootloader (REV_0100) and fastbootd (REV_0606) both enumerate as USB
   `18D1:D00D`, which Google's `android_winusb.inf` doesn't list, so Device Manager shows "CPH2793" with an error
   and a manually picked driver is lost on every mode switch. `assets/fastboot_driver` adds a WinUSB inf with the

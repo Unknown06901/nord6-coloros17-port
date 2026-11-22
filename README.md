@@ -36,9 +36,12 @@ Other options:
 - `--keep-going`: report a failing patch instead of stopping the build.
 - `--check`: only check Python, Java, the bundled tools, the inputs and free space, then exit (0 = ready).
 
-The output is all images, `flash_all.bat`, `ksu_root.ps1` and `BUILD_REPORT.txt`. The report lists every step,
-the donor fingerprint and the total size of the logical partitions. Flash from Windows with
-`flash_all.bat`, which asks for the mode first:
+The output is all images, `firmware/` (the base build's 25 firmware images + `md5.txt`), `flash_all.bat`,
+`ksu_root.ps1` and `BUILD_REPORT.txt`. The report lists every step, the donor fingerprint and the total size of
+the logical partitions. Flash from Windows with `flash_all.bat`, which asks for the mode first. Both flash modes
+also flash `firmware/` to the current slot when the folder is there (no wipe; see "Firmware fix" below for why
+Android Auto and "Hey Google" need it): `modem` from the bootloader right after TWRP, the other 24 from TWRP
+FastbootD after the boot images. A fix package without `firmware/` skips it; deleting the folder skips it too.
 
 - Clean flash: for a first install (from stock OxygenOS 16 / ColorOS 17 or any other ROM). Needs the full image set, flashes
   everything and wipes data at the end. It asks Root with KernelSU Next or No root.
@@ -88,7 +91,9 @@ install `ksu\KernelSU_Next.apk` by hand.
 python3 make_firmware_fix.py BASE out_fw_fix      # BASE = base images folder, payload.bin or OTA zip
 ```
 
-The port needs the phone on the base build's firmware (ColorOS 17.0.0.100). With OxygenOS 16 firmware the base's
+The port needs the phone on the base build's firmware (ColorOS 17.0.0.100). Since 2026-11-22 the port build
+carries it in `firmware/` and `flash_all.bat` flashes it, so this separate folder is only for a phone that keeps
+its port images and just needs the firmware (or for the recovery zip, which never writes firmware). With OxygenOS 16 firmware the base's
 "Hey Google" DSP model crashes the ADSP whenever Hey Google is armed; each crash drops charging and USB, so wired
 Android Auto keeps reconnecting. This writes `out_fw_fix/` with the base firmware images (25 by default; the
 four that are identical on OxygenOS 16.0.5.1300 are left out, `--all` keeps them, `--skip-same-as DIR` also drops

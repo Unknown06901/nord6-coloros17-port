@@ -31,6 +31,9 @@ echo      Flashes only the .img files in this folder and KEEPS your data,
 echo      so a fix package can contain just the patched images.
 echo      Do NOT use this coming from stock firmware or another ROM: it will not boot without a wipe.
 echo.
+echo   Both flash the stock ColorOS 17.0.0.100 firmware from the firmware folder too ^(no data loss^),
+echo   needed for Android Auto and "Hey Google". Delete the firmware folder to skip it.
+echo.
 echo   3. Collect logs - the phone does not boot, or something is wrong after flashing.
 echo      Saves phone info and logs to a zip file you can send to the developer.
 echo.
@@ -87,6 +90,17 @@ if not exist "twrp_nord6.img" (
 set KSU_IMG=
 if "%ROOT%"=="ksu" call :ksu_prepare || goto :abort
 set BOOTIMGS=boot init_boot vendor_boot dtbo
+REM firmware\: stock ColorOS 17.0.0.100 firmware. The OxygenOS 16 ADSP firmware crashes on the port's "Hey Google"
+REM voice model (each crash drops charging and USB: wired Android Auto reconnect loop). modem is written from the
+REM bootloader (FastbootD can't open it, the recovery has it mounted); the bootloader refuses the other, critical,
+REM partitions without "flashing unlock_critical" (wipes), so they go from FastbootD. Both go to the current slot.
+set FW=0
+if exist "firmware\modem.img" set FW=1
+set FWPARTS=xbl xbl_config xbl_ramdump abl tz hyp keymaster devcfg qupfw uefi uefisecapp imagefv shrm cpucp cpucp_dtb aop aop_config bluetooth featenabler pvmfw soccp_debug soccp_dcd engineering_cdt oplusstanvbk
+if "%FW%"=="1" for %%p in (%FWPARTS%) do if not exist "firmware\%%p.img" (
+    call :say ERROR: firmware\%%p.img is missing. Copy the whole firmware folder, or delete it to skip the firmware.
+    goto :abort
+)
 if "%ROOT%"=="keep" set BOOTIMGS=boot vendor_boot dtbo
 
 echo Make sure your phone is connected in FASTBOOT (Bootloader) mode
@@ -134,6 +148,10 @@ for %%p in (vbmeta vbmeta_system vbmeta_vendor) do (
 if "!FLASH_FAILED!"=="1" goto :failed
 call :say Flashing TWRP to the recovery partition of the current slot...
 call :run fastboot flash recovery twrp_nord6.img || goto :failed
+if "%FW%"=="1" (
+    call :say Flashing the ColorOS 17 firmware modem from the bootloader...
+    call :run fastboot flash modem firmware\modem.img || goto :failed
+)
 
 echo.
 call :say [2/5] Rebooting into TWRP FastbootD...
@@ -156,6 +174,11 @@ for %%p in (%BOOTIMGS%) do (
         call :say Flashing KernelSU Next patched init_boot.
     )
     if exist "!IMG!" call :run fastboot flash %%p "!IMG!" || set FLASH_FAILED=1
+)
+if "!FLASH_FAILED!"=="1" goto :failed
+if "%FW%"=="1" (
+    call :say TWRP FastbootD: flashing the rest of the ColorOS 17 firmware...
+    for %%p in (%FWPARTS%) do call :run fastboot flash %%p firmware\%%p.img || set FLASH_FAILED=1
 )
 if "!FLASH_FAILED!"=="1" goto :failed
 
